@@ -70,6 +70,48 @@ rules:
 	}
 }
 
+func TestDefaultPermissionsExposeNukesButGateNukeCommands(t *testing.T) {
+	e, err := LoadEngine(filepath.Join("..", "..", "etc", "permissions.yml"))
+	if err != nil {
+		t.Fatalf("LoadEngine(default permissions) failed: %v", err)
+	}
+
+	normal := &user.User{Name: "normal"}
+	nuker := &user.User{
+		Name:         "nuker",
+		PrimaryGroup: "NUKERS",
+		Groups:       map[string]int{"NUKERS": 0},
+	}
+	legacyNuker := &user.User{Name: "legacy-nuker", Flags: "1A"}
+	legacyUnnuker := &user.User{Name: "legacy-unnuker", Flags: "1B"}
+	bot := &user.User{Name: "weaveftpd"}
+
+	if !e.CanPerformRuleOnly(normal, "sitecmd", "NUKES") {
+		t.Fatal("SITE NUKES should be visible to normal users")
+	}
+	if e.CanPerformRuleOnly(normal, "sitecmd", "NUKE") {
+		t.Fatal("SITE NUKE should not be visible to normal users")
+	}
+	if e.CanPerformRuleOnly(normal, "sitecmd", "UNNUKE") {
+		t.Fatal("SITE UNNUKE should not be visible to normal users")
+	}
+	if !e.CanPerformRuleOnly(nuker, "sitecmd", "NUKE") {
+		t.Fatal("SITE NUKE should be visible to nukers")
+	}
+	if !e.CanPerformRuleOnly(nuker, "sitecmd", "UNNUKE") {
+		t.Fatal("SITE UNNUKE should be visible to unnukers")
+	}
+	if !e.CanPerformRuleOnly(legacyNuker, "sitecmd", "NUKE") {
+		t.Fatal("SITE NUKE should be visible to legacy nuker flags")
+	}
+	if !e.CanPerformRuleOnly(legacyUnnuker, "sitecmd", "UNNUKE") {
+		t.Fatal("SITE UNNUKE should be visible to legacy unnuker flags")
+	}
+	if !e.CanPerformRuleOnly(bot, "sitecmd", "NUKE") {
+		t.Fatal("SITE NUKE should be visible to the weaveftpd bot account")
+	}
+}
+
 func TestStructuredRequirementSupportsAllGroupsAndAnyFlags(t *testing.T) {
 	req := &Requirement{
 		AllGroups: []string{"Admin", "NUKERS"},

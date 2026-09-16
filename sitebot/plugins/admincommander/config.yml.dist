@@ -45,6 +45,7 @@ allowed_commands:
   - GRPDEL
   - INVITE
   - NUKE
+  - NUKES
   - UNNUKE
   - UNDUPE
   - WIPE

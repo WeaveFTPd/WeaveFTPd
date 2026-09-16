@@ -109,8 +109,7 @@ rules:
         - DAYDN
         - MONTHUP
         - MONTHDN
-        - NUKE
-        - UNNUKE
+        - NUKES
         - REQUEST
         - REQUESTS
         - REQFILL
@@ -122,6 +121,22 @@ rules:
         - AFFILS
         - PRE
       required: $anyone
+
+    - allow:
+        - NUKE
+      required:
+        any_of:
+          - users: ["weaveftpd"]
+          - all_groups: ["NUKERS"]
+          - all_flags: ["1", "A"]
+
+    - allow:
+        - UNNUKE
+      required:
+        any_of:
+          - users: ["weaveftpd"]
+          - all_groups: ["NUKERS"]
+          - all_flags: ["1", "B"]
 
     - allow:
         - WHO
@@ -169,7 +184,6 @@ rules:
         - REHASH
         - REMERGE
         - REMERGESTOP
-        - NUKES
         - SLAVEBANS
         - SLAVEBAN
         - SLAVEUNBAN
