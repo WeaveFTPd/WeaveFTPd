@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/sha1"
 	"crypto/tls"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -587,6 +588,7 @@ func (h *Handler) cleanupOldNukes() {
 			if err := h.svc.Bridge.DeleteFile(target); err != nil && !isCleanupNotFoundError(err) {
 				h.logf("delete old nuke VFS cleanup skipped for %s: %v", target, err)
 			}
+			h.markNukeDeleted(target)
 			h.logf("deleted old nuked release %s after %s", target, formatMinutes(limitMinutes))
 			rel := releaseCandidate{
 				Path:    target,
@@ -599,6 +601,16 @@ func (h *Handler) cleanupOldNukes() {
 			h.appendHistory("cleanup_deleted", rel, reason, "")
 			h.emitCleanupDeleted(rel, reason)
 		}
+	}
+}
+
+func (h *Handler) markNukeDeleted(target string) {
+	db, err := core.GetNukeHistoryDB(false)
+	if err != nil || db == nil {
+		return
+	}
+	if _, err := db.MarkDeleted(target); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		h.logf("mark old nuke deleted failed for %s: %v", target, err)
 	}
 }
 
