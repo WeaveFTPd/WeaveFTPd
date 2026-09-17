@@ -247,6 +247,9 @@ func (s *Session) HandleSiteNukes(args []string) bool {
 	if db, err := GetNukeHistoryDB(s.Config.Debug); err == nil {
 		entries, err := db.List(query, siteSearchLimit)
 		if err == nil {
+			if bridge, ok := s.masterBridge(); ok {
+				entries = s.pruneMissingActiveNukeHistory(bridge, db, entries)
+			}
 			fmt.Fprintf(s.Conn, "200- Nuke history (%d):\r\n", len(entries))
 			for _, entry := range entries {
 				line := fmt.Sprintf("[%s] %s x%d by %s at %s :: %s :: %d users :: %s",
@@ -313,6 +316,34 @@ func (s *Session) HandleSiteNukes(args []string) bool {
 	}
 	fmt.Fprintf(s.Conn, "200 End of NUKES\r\n")
 	return false
+}
+
+func (s *Session) pruneMissingActiveNukeHistory(bridge MasterBridge, db *NukeHistoryDB, entries []NukeHistoryEntry) []NukeHistoryEntry {
+	if bridge == nil || db == nil {
+		return entries
+	}
+	out := entries[:0]
+	for _, entry := range entries {
+		if strings.EqualFold(entry.Status, "active") && !nukeHistoryEntryExists(bridge, entry) {
+			if _, err := db.MarkDeleted(entry.CurrentPath); err != nil && !errors.Is(err, sql.ErrNoRows) && s != nil && s.Config != nil && s.Config.Debug {
+				log.Printf("[NUKE-DB] mark deleted failed for %s: %v", entry.CurrentPath, err)
+			}
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+func nukeHistoryEntryExists(bridge MasterBridge, entry NukeHistoryEntry) bool {
+	if bridge == nil {
+		return false
+	}
+	candidate := strings.TrimSpace(entry.CurrentPath)
+	if candidate == "" {
+		candidate = strings.TrimSpace(entry.OriginalPath)
+	}
+	return candidate != "" && bridge.FileExists(candidate)
 }
 
 func (s *Session) handleSiteNukeVFS(bridge MasterBridge, target string, multiplier int, reason string) bool {

@@ -79,6 +79,7 @@ type Session struct {
 	PassthruXferIdx int32       // slave transfer index for passthrough
 	RestOffset      int64       // REST offset applied to the next STOR/RETR
 	XDupeMode       int         // SITE XDUPE mode for duplicate listings on STOR
+	QuietMode       bool        // glftpd-style "-password" login: suppress MOTD/section/CWD messages
 
 	stateMu               sync.RWMutex
 	lastDataConnActive    bool
