@@ -324,17 +324,31 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 				pass = args[0]
 			}
 
-			passwordOK := false
-			matchedHash := ""
-			passwds, err := LoadPasswdFile(s.Config.PasswdFile)
-			if err == nil {
-				if hash, ok := passwds[s.User.Name]; ok {
-					matchedHash = hash
-					passwordOK = VerifyPasswordCached(s.User.Name, pass, hash)
+			verifyPass := func(p string) (bool, string) {
+				ok := false
+				hash := ""
+				if passwds, err := LoadPasswdFile(s.Config.PasswdFile); err == nil {
+					if h, found := passwds[s.User.Name]; found {
+						hash = h
+						ok = VerifyPasswordCached(s.User.Name, p, h)
+					}
 				}
+				if !ok && s.User.Password != "" {
+					ok = (s.User.Password == p)
+				}
+				return ok, hash
 			}
-			if !passwordOK && s.User.Password != "" {
-				passwordOK = (s.User.Password == pass)
+
+			passwordOK, matchedHash := verifyPass(pass)
+			// glftpd-compatible quiet login: prefixing the password with "-"
+			// suppresses MOTD, tagline and section/CWD messages for this
+			// session (racers keep only the credits line).
+			if !passwordOK && len(pass) > 1 && strings.HasPrefix(pass, "-") {
+				if ok, hash := verifyPass(pass[1:]); ok {
+					pass = pass[1:]
+					passwordOK, matchedHash = true, hash
+					s.QuietMode = true
+				}
 			}
 			if !passwordOK {
 				s.emitLoginFailure(s.User.Name, remoteIP, "bad_password")
@@ -412,9 +426,10 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 			s.IsLogged = true
 			s.PendingUser = ""
 			s.PendingReason = ""
-			s.emitLoginMOTD()
-			fmt.Fprintf(s.Conn, "230-Tagline: %s\r\n", s.User.Tagline)
-
+			if !s.QuietMode {
+				s.emitLoginMOTD()
+				fmt.Fprintf(s.Conn, "230-Tagline: %s\r\n", s.User.Tagline)
+			}
 			s.showGlobalStats("230", false)
 			fmt.Fprintf(s.Conn, "230 User logged in.\r\n")
 			s.persistLoginStateAsync(s.User.Name, s.User.LastLogin)
@@ -534,7 +549,7 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 		}
 		s.CurrentDir = targetPath
 
-		if s.Config.Mode == "master" && s.MasterManager != nil {
+		if s.Config.Mode == "master" && s.MasterManager != nil && !s.QuietMode {
 			if bridge, ok := s.MasterManager.(MasterBridge); ok {
 				emitCWDSectionRules(s, s.CurrentDir)
 				emitCWDZipDIZInfo(s, bridge, s.CurrentDir)
