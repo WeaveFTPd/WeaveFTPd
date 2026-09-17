@@ -57,9 +57,11 @@ roles:
       - all_groups: ["SiteOP"]
       - all_flags: ["1"]
 
-  # Staff policy is group-based; SiteOPs are included too.
+  # Staff policy is group-based; SiteOPs (group or legacy flag 1) are included too.
   staff:
-    any_groups: ["STAFF", "SiteOP"]
+    any_of:
+      - any_groups: ["STAFF", "SiteOP"]
+      - all_flags: ["1"]
 
   # Group-first nuker policy with a legacy flags fallback.
   nuker:
