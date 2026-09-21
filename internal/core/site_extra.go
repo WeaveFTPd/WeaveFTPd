@@ -60,7 +60,8 @@ func (s *Session) HandleSiteUser(args []string) bool {
 		groups = append(groups, group)
 	}
 	sort.Strings(groups)
-	fmt.Fprintf(s.Conn, "200- User: %s\r\n", u.Name)
+	fmt.Fprintf(s.Conn, "200- User: %s (UID: %d GID: %d)\r\n", u.Name, u.UID, u.GID)
+	fmt.Fprintf(s.Conn, "200- Tagline: %s\r\n", u.Tagline)
 	fmt.Fprintf(s.Conn, "200- Flags: %s\r\n", u.Flags)
 	fmt.Fprintf(s.Conn, "200- Primary group: %s\r\n", u.PrimaryGroup)
 	fmt.Fprintf(s.Conn, "200- Groups: %s\r\n", strings.Join(groups, ", "))
@@ -68,10 +69,34 @@ func (s *Session) HandleSiteUser(args []string) bool {
 	fmt.Fprintf(s.Conn, "200- Ratio: %s Credits: %s\r\n", formatRatio(u.Ratio), formatBytes(u.Credits))
 	fmt.Fprintf(s.Conn, "200- Limits: logins=%d maxsim=%d ulslots=%d dlslots=%d wkly_allotment=%s groupslots=%d leechslots=%d\r\n",
 		u.LoginSlots, u.MaxSim, u.UploadSlots, u.DownloadSlots, formatBytes(u.WeeklyAllotment), u.GroupSlots, u.LeechSlots)
-	fmt.Fprintf(s.Conn, "200- Uploaded: %dF/%s Downloaded: %dF/%s\r\n",
+	fmt.Fprintf(s.Conn, "200- All up:   %6dF / %-10s All dn:   %6dF / %s\r\n",
 		u.AllUp.Files, formatBytes(u.AllUp.Bytes), u.AllDn.Files, formatBytes(u.AllDn.Bytes))
-	fmt.Fprintf(s.Conn, "200- Added: %s Last login: %s Expires: %s\r\n",
-		formatUnixTime(u.Added), formatUnixTime(u.LastLogin), formatUnixTime(u.Expires))
+	fmt.Fprintf(s.Conn, "200- Month up: %6dF / %-10s Month dn: %6dF / %s\r\n",
+		u.MonthUp.Files, formatBytes(u.MonthUp.Bytes), u.MonthDn.Files, formatBytes(u.MonthDn.Bytes))
+	fmt.Fprintf(s.Conn, "200- Week up:  %6dF / %-10s Week dn:  %6dF / %s\r\n",
+		u.WkUp.Files, formatBytes(u.WkUp.Bytes), u.WkDn.Files, formatBytes(u.WkDn.Bytes))
+	fmt.Fprintf(s.Conn, "200- Day up:   %6dF / %-10s Day dn:   %6dF / %s\r\n",
+		u.DayUp.Files, formatBytes(u.DayUp.Bytes), u.DayDn.Files, formatBytes(u.DayDn.Bytes))
+	if u.NukeStat.Files > 0 {
+		fmt.Fprintf(s.Conn, "200- Nuked: %d times / %s (last: %s)\r\n",
+			u.NukeStat.Files, formatBytes(u.NukeStat.Bytes), formatUnixTime(u.NukeStat.Meta))
+	} else {
+		fmt.Fprintf(s.Conn, "200- Nuked: never\r\n")
+	}
+	addedBy := strings.TrimSpace(u.AddedBy)
+	if addedBy == "" {
+		addedBy = "unknown"
+	}
+	fmt.Fprintf(s.Conn, "200- Added: %s by %s\r\n", formatUnixTime(u.Added), addedBy)
+	fmt.Fprintf(s.Conn, "200- Last login: %s Expires: %s\r\n",
+		formatUnixTime(u.LastLogin), formatUnixTime(u.Expires))
+	if len(u.IPs) == 0 {
+		fmt.Fprintf(s.Conn, "200- IPs: none\r\n")
+	} else {
+		for i, ip := range u.IPs {
+			fmt.Fprintf(s.Conn, "200- IP%d: %s\r\n", i, ip)
+		}
+	}
 	if ban, ok := FindUserBan(u.Name); ok {
 		fmt.Fprintf(s.Conn, "200- Ban: yes (%s by %s at %s)\r\n", ban.Reason, ban.By, formatUnixTime(ban.Added))
 	}

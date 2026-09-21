@@ -380,6 +380,7 @@ func defaultAllowedCommands() []string {
 		"GRPDEL",
 		"INVITE",
 		"NUKE",
+		"NUKES",
 		"UNNUKE",
 		"UNDUPE",
 		"WIPE",

@@ -239,6 +239,27 @@ func (s *Session) HandleSiteAddUser(args []string) bool {
 	return false
 }
 
+// groupExists reports whether groupName is a known group. It checks the
+// session's cached GroupMap first, and on a miss re-reads etc/group from disk
+// so that groups created after this session logged in (by GRPADD in another
+// session, or an out-of-band edit) are still recognized instead of wrongly
+// reported as "not found".
+func (s *Session) groupExists(groupName string) bool {
+	if _, ok := s.GroupMap[groupName]; ok {
+		return true
+	}
+	fresh := LoadGroupFile("etc/group")
+	if gid, ok := fresh[groupName]; ok {
+		if s.GroupMap == nil {
+			s.GroupMap = fresh
+		} else {
+			s.GroupMap[groupName] = gid
+		}
+		return true
+	}
+	return false
+}
+
 func (s *Session) HandleSiteGAddUser(args []string) bool {
 	if len(args) < 3 {
 		fmt.Fprintf(s.Conn, "501 Usage: SITE GADDUSER <user> <pass> <group> [ident@ip ...]\r\n")
@@ -258,7 +279,7 @@ func (s *Session) HandleSiteGAddUser(args []string) bool {
 		fmt.Fprintf(s.Conn, "550 Access denied.\r\n")
 		return false
 	}
-	if _, ok := s.GroupMap[groupName]; !ok {
+	if !s.groupExists(groupName) {
 		fmt.Fprintf(s.Conn, "550 Group %s not found.\r\n", groupName)
 		return false
 	}

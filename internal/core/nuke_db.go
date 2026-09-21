@@ -202,6 +202,31 @@ func (n *NukeHistoryDB) MarkUnnuked(nukedPath, restoredPath, unnukedBy string, c
 	return entry, nil
 }
 
+func (n *NukeHistoryDB) MarkDeleted(nukedPath string) (*NukeHistoryEntry, error) {
+	if n == nil || n.db == nil {
+		return nil, fmt.Errorf("nuke db unavailable")
+	}
+	entry, err := n.FindActiveByPath(nukedPath)
+	if err != nil {
+		return nil, err
+	}
+	if entry == nil {
+		return nil, sql.ErrNoRows
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	_, err = n.db.Exec(`
+		UPDATE nukes
+		SET status = 'deleted'
+		WHERE id = ?
+	`, entry.ID)
+	if err != nil {
+		return nil, err
+	}
+	entry.Status = "deleted"
+	return entry, nil
+}
+
 func (n *NukeHistoryDB) List(filter string, limit int) ([]NukeHistoryEntry, error) {
 	if n == nil || n.db == nil {
 		return nil, fmt.Errorf("nuke db unavailable")
@@ -217,13 +242,14 @@ func (n *NukeHistoryDB) List(filter string, limit int) ([]NukeHistoryEntry, erro
 		       nuked_at, users_affected, total_bytes, total_credits_removed, nukees, nukees_data, status,
 		       unnuked_by, unnuked_at, restored_path, total_credits_restored
 		FROM nukes
+		WHERE status != 'deleted'
 	`
 	args := []interface{}{}
 	if filter != "" {
 		like := "%" + filter + "%"
 		query += `
-		WHERE LOWER(original_path) LIKE ? OR LOWER(current_path) LIKE ? OR LOWER(release_name) LIKE ?
-		   OR LOWER(reason) LIKE ? OR LOWER(nuked_by) LIKE ? OR LOWER(nukees) LIKE ?
+		AND (LOWER(original_path) LIKE ? OR LOWER(current_path) LIKE ? OR LOWER(release_name) LIKE ?
+		   OR LOWER(reason) LIKE ? OR LOWER(nuked_by) LIKE ? OR LOWER(nukees) LIKE ?)
 		`
 		args = append(args, like, like, like, like, like, like)
 	}
