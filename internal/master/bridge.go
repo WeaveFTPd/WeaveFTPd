@@ -35,6 +35,7 @@ type Bridge struct {
 	liveTransferStatsCache []core.LiveTransferStat
 	liveTransferStatsAt    time.Time
 	liveTransferStatsMu    sync.Mutex
+	listingDiagnosticAt    map[string]time.Time
 
 	pendingUploads sync.Map          // clean virtual path -> pendingUpload, visible to FTP listings only
 	uploadRecords  chan uploadRecord // async race-DB upload writes, off the 226 path
@@ -159,31 +160,38 @@ func (b *Bridge) GetLiveTransferStatsFresh() []core.LiveTransferStat {
 }
 
 func (b *Bridge) getLiveTransferStats(useCache bool) []core.LiveTransferStat {
-	if b == nil {
+	if b == nil || b.sm == nil {
 		return nil
 	}
 	if useCache {
 		if cached, ok := b.cachedLiveTransferStats(liveTransferStatsCacheTTL); ok {
 			return cached
 		}
-		if !b.liveTransferStatsMu.TryLock() {
-			if cached, ok := b.cachedLiveTransferStats(0); ok {
-				return cached
-			}
-			b.liveTransferStatsMu.Lock()
+		// Return the last snapshot even on expiry or first use. Only one
+		// refresh runs, and listings never wait for its mutex or slave replies.
+		cached, _ := b.cachedLiveTransferStats(0)
+		if b.liveTransferStatsMu.TryLock() {
+			go func() {
+				defer b.liveTransferStatsMu.Unlock()
+				if _, ok := b.cachedLiveTransferStats(liveTransferStatsCacheTTL); !ok {
+					b.refreshLiveTransferStats()
+				}
+			}()
 		}
-	} else {
-		b.liveTransferStatsMu.Lock()
+		return cached
 	}
+	b.liveTransferStatsMu.Lock()
 	defer b.liveTransferStatsMu.Unlock()
+	return b.refreshLiveTransferStats()
+}
 
-	if useCache {
-		if cached, ok := b.cachedLiveTransferStats(liveTransferStatsCacheTTL); ok {
-			return cached
-		}
-	}
-
+// Caller holds liveTransferStatsMu. Explicit fresh callers (upload completion)
+// can still wait; listing callers run this in the background.
+func (b *Bridge) refreshLiveTransferStats() []core.LiveTransferStat {
+	started := time.Now()
+	defer func() { b.logListingDelay("slave-statistics", "", time.Since(started), nil) }()
 	slaves := b.sm.GetAllSlaves()
+	previous, _ := b.cachedLiveTransferStats(0)
 	type result struct {
 		stats []core.LiveTransferStat
 	}
@@ -196,16 +204,31 @@ func (b *Bridge) getLiveTransferStats(useCache bool) []core.LiveTransferStat {
 		wg.Add(1)
 		go func(slave *RemoteSlave) {
 			defer wg.Done()
+			started := time.Now()
+			failed := func(err error) {
+				b.logListingDelay("slave-statistics:"+slave.Name(), "", time.Since(started), err)
+				// A failed refresh is not evidence that active uploads ended.
+				var retained []core.LiveTransferStat
+				for _, stat := range previous {
+					if stat.SlaveName == slave.Name() {
+						retained = append(retained, stat)
+					}
+				}
+				results <- result{stats: retained}
+			}
 			idx, err := IssueTransferStats(slave)
 			if err != nil {
+				failed(err)
 				return
 			}
 			resp, err := slave.FetchResponse(idx, 5*time.Second)
 			if err != nil {
+				failed(err)
 				return
 			}
 			statsResp, ok := resp.(*protocol.AsyncResponseTransferStats)
 			if !ok {
+				failed(fmt.Errorf("unexpected transfer statistics response %T", resp))
 				return
 			}
 			out := make([]core.LiveTransferStat, 0, len(statsResp.Stats))
@@ -428,6 +451,8 @@ var _ plugin.MasterBridge = (*Bridge)(nil)
 
 // ListDir returns directory entries from the master's VFS.
 func (b *Bridge) ListDir(dirPath string) []core.MasterFileEntry {
+	started := time.Now()
+	defer func() { b.logListingDelay("list-directory", dirPath, time.Since(started), nil) }()
 	vfsFiles := b.sm.GetVFS().ListDirectory(dirPath)
 	if b.repairZeroSizeListEntries(dirPath, vfsFiles) {
 		vfsFiles = b.sm.GetVFS().ListDirectory(dirPath)
@@ -621,9 +646,10 @@ func (b *Bridge) repairZeroSizeListEntries(dirPath string, files []*VFSFile) boo
 		}
 	}
 	if records == nil {
+		started := time.Now()
 		fresh, err := b.raceDB.VerifiedPresentFiles(dirPath)
+		b.logListingDelay("race-db-repair", dirPath, time.Since(started), err)
 		if err != nil {
-			log.Printf("[Bridge] race DB zero-size listing repair failed for %s: %v", dirPath, err)
 			return false
 		}
 		records = fresh
@@ -657,6 +683,25 @@ func (b *Bridge) repairZeroSizeListEntries(dirPath string, files []*VFSFile) boo
 		metrics.ZeroSizeRepairs.Add(int64(repairedCount))
 	}
 	return repaired
+}
+
+// Rate-limit diagnostics by phase so a busy release cannot flood the log.
+func (b *Bridge) logListingDelay(phase, dirPath string, elapsed time.Duration, err error) {
+	if err == nil && elapsed < 250*time.Millisecond {
+		return
+	}
+	now := time.Now()
+	b.cacheMu.Lock()
+	if now.Sub(b.listingDiagnosticAt[phase]) < 30*time.Second {
+		b.cacheMu.Unlock()
+		return
+	}
+	if b.listingDiagnosticAt == nil {
+		b.listingDiagnosticAt = make(map[string]time.Time)
+	}
+	b.listingDiagnosticAt[phase] = now
+	b.cacheMu.Unlock()
+	log.Printf("[Bridge] listing diagnostic phase=%s path=%q elapsed=%s error=%v", phase, dirPath, elapsed, err)
 }
 
 func masterEntryFromVFSFile(f *VFSFile) core.MasterFileEntry {
