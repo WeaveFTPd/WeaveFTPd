@@ -16,7 +16,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"weaveftpd/internal/timeutil"
@@ -2433,12 +2432,12 @@ func (s *Session) showGlobalStats(code string, final bool) {
 		}
 	}
 	if freeSpaceMB == 0 {
-		var stat syscall.Statfs_t
 		wd, _ := os.Getwd()
-		if err := syscall.Statfs(s.Config.StoragePath, &stat); err != nil {
-			_ = syscall.Statfs(wd, &stat)
+		if mb, ok := freeSpaceMBForPath(s.Config.StoragePath); ok {
+			freeSpaceMB = mb
+		} else if mb, ok := freeSpaceMBForPath(wd); ok {
+			freeSpaceMB = mb
 		}
-		freeSpaceMB = (stat.Bavail * uint64(stat.Bsize)) / 1024 / 1024
 	}
 	ulGiB := 0.0
 	dlGiB := 0.0

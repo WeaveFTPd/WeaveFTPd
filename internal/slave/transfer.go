@@ -253,6 +253,7 @@ func (t *Transfer) ReceiveFile(path string, position int64, expectedPeer string)
 	}
 	defer file.Close()
 	if isUnexpectedTransferPeer(expectedPeer, conn.RemoteAddr()) {
+		log.Printf("[Transfer] rejected receive: peer %s does not match expected %q (idx=%d)", conn.RemoteAddr(), expectedPeer, t.transferIndex)
 		cleanupFailedReceive(file, fullPath, position)
 		return t.errorStatus("The IP that connected to the socket was not the one that was expected.")
 	}
@@ -467,6 +468,7 @@ func (t *Transfer) SendFile(path string, position int64, expectedPeer string) pr
 	}
 	defer conn.Close()
 	if isUnexpectedTransferPeer(expectedPeer, conn.RemoteAddr()) {
+		log.Printf("[Transfer] rejected send: peer %s does not match expected %q (idx=%d)", conn.RemoteAddr(), expectedPeer, t.transferIndex)
 		return t.errorStatus("The IP that connected to the socket was not the one that was expected.")
 	}
 	t.mu.Lock()
@@ -614,6 +616,7 @@ func (t *Transfer) acceptPassiveConn() error {
 	if t.sslClientMode {
 		tlsConn := tls.Client(conn, dataClientTLSConfig(conn))
 		if err := tlsConn.Handshake(); err != nil {
+			log.Printf("[Transfer] data TLS client handshake with %s failed (idx=%d): %v", conn.RemoteAddr(), t.transferIndex, err)
 			conn.Close()
 			return fmt.Errorf("TLS client handshake failed: %v", err)
 		}
@@ -623,11 +626,13 @@ func (t *Transfer) acceptPassiveConn() error {
 
 	tlsCfg, err := t.slave.serverTLSConfig()
 	if err != nil {
+		log.Printf("[Transfer] data TLS server cert load failed (idx=%d): %v", t.transferIndex, err)
 		conn.Close()
 		return fmt.Errorf("load TLS cert: %v", err)
 	}
 	tlsConn := tls.Server(conn, tlsCfg)
 	if err := tlsConn.Handshake(); err != nil {
+		log.Printf("[Transfer] data TLS server handshake with %s failed (idx=%d): %v", conn.RemoteAddr(), t.transferIndex, err)
 		conn.Close()
 		return fmt.Errorf("TLS server handshake failed: %v", err)
 	}
@@ -667,6 +672,7 @@ func (t *Transfer) connectActive() error {
 	if t.sslClientMode {
 		tlsConn := tls.Client(conn, dataClientTLSConfig(conn))
 		if err := tlsConn.Handshake(); err != nil {
+			log.Printf("[Transfer] data TLS client handshake with %s failed (idx=%d): %v", conn.RemoteAddr(), t.transferIndex, err)
 			conn.Close()
 			return fmt.Errorf("TLS client handshake failed: %v", err)
 		}
@@ -676,11 +682,13 @@ func (t *Transfer) connectActive() error {
 
 	tlsCfg, err := t.slave.serverTLSConfig()
 	if err != nil {
+		log.Printf("[Transfer] data TLS server cert load failed (idx=%d): %v", t.transferIndex, err)
 		conn.Close()
 		return fmt.Errorf("load TLS cert: %v", err)
 	}
 	tlsConn := tls.Server(conn, tlsCfg)
 	if err := tlsConn.Handshake(); err != nil {
+		log.Printf("[Transfer] data TLS server handshake with %s failed (idx=%d): %v", conn.RemoteAddr(), t.transferIndex, err)
 		conn.Close()
 		return fmt.Errorf("TLS server handshake failed: %v", err)
 	}

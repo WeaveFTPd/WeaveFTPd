@@ -601,10 +601,6 @@ func missingFilesSummary(status ReleaseStatus) string {
 }
 
 func raceStatsForDir(bridge MasterBridge, cfg *Config, dirPath string) (users []VFSRaceUser, groups []VFSRaceGroup, totalBytes int64, present int, total int) {
-	type freshRaceStatsBridge interface {
-		GetVFSRaceStatsFresh(dirPath string) (users []VFSRaceUser, groups []VFSRaceGroup, totalBytes int64, present int, total int)
-	}
-
 	if bridge == nil || cfg == nil {
 		return nil, nil, 0, 0, 0
 	}
@@ -628,9 +624,8 @@ func raceStatsForDir(bridge MasterBridge, cfg *Config, dirPath string) (users []
 		groups = raceGroupsFromUsers(users, total)
 		return users, groups, totalBytes, present, total
 	}
-	if freshBridge, ok := bridge.(freshRaceStatsBridge); ok {
-		return freshBridge.GetVFSRaceStatsFresh(dirPath)
-	}
+	// Listing status must use the snapshot path. Fresh slave requests are kept
+	// for upload completion, where the final race result needs current data.
 	return bridge.GetVFSRaceStats(dirPath)
 }
 
