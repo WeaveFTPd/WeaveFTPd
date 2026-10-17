@@ -1,15 +1,19 @@
 package master
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 	"weaveftpd/internal/core"
@@ -17,8 +21,11 @@ import (
 
 type RaceDB struct {
 	db             *sql.DB
+	listingDB      *sql.DB
 	releaseIDCache sync.Map
 }
+
+const raceDBListingTimeout = 50 * time.Millisecond
 
 type ReleaseFileRecord struct {
 	FileName   string
@@ -108,14 +115,43 @@ CREATE INDEX IF NOT EXISTS idx_release_media_release_id ON release_media(release
 		return nil, fmt.Errorf("init race db schema: %w", err)
 	}
 
-	return &RaceDB{db: db}, nil
+	// Optional listing repairs must not queue behind upload transactions. WAL
+	// permits this reader to see committed data while the writer is occupied.
+	absPath, err := filepath.Abs(dbPath)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("resolve race db path: %w", err)
+	}
+	uriPath := filepath.ToSlash(absPath)
+	if !strings.HasPrefix(uriPath, "/") {
+		uriPath = "/" + uriPath
+	}
+	readerURI := url.URL{Scheme: "file", Path: uriPath}
+	readerURI.RawQuery = url.Values{"mode": {"ro"}, "_busy_timeout": {"0"}, "_query_only": {"1"}}.Encode()
+	listingDB, err := sql.Open("sqlite3", readerURI.String())
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("open race db listing reader: %w", err)
+	}
+	listingDB.SetMaxOpenConns(1)
+	listingDB.SetMaxIdleConns(1)
+	if err := listingDB.Ping(); err != nil {
+		listingDB.Close()
+		db.Close()
+		return nil, fmt.Errorf("init race db listing reader: %w", err)
+	}
+	return &RaceDB{db: db, listingDB: listingDB}, nil
 }
 
 func (r *RaceDB) Close() error {
 	if r == nil || r.db == nil {
 		return nil
 	}
-	return r.db.Close()
+	var readerErr error
+	if r.listingDB != nil {
+		readerErr = r.listingDB.Close()
+	}
+	return errors.Join(readerErr, r.db.Close())
 }
 
 func (r *RaceDB) getOrCreateReleaseID(dirPath string) (int64, error) {
@@ -412,11 +448,15 @@ func existingReleaseFilesTx(tx *sql.Tx, releaseID int64) (map[string]ReleaseFile
 }
 
 func (r *RaceDB) VerifiedPresentFiles(dirPath string) (map[string]ReleaseFileRecord, error) {
-	if r == nil || r.db == nil {
+	if r == nil || r.listingDB == nil {
 		return nil, nil
 	}
+	// This also bounds waiting for another listing to release the reader. A
+	// context alone would not avoid SQLite's five-second writer busy handler.
+	ctx, cancel := context.WithTimeout(context.Background(), raceDBListingTimeout)
+	defer cancel()
 	dirPath = filepath.Clean(dirPath)
-	rows, err := r.db.Query(`
+	rows, err := r.listingDB.QueryContext(ctx, `
         SELECT p.filename, p.uploader, p.grp, p.size_bytes, p.duration_ms, p.checksum
         FROM releases r
         JOIN release_files p
