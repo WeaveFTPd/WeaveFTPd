@@ -23,7 +23,7 @@ Choose **master** for a complete server. The wizard asks for:
 - Section names (comma-separated; default `TEST`). These directories are created in storage.
 - Your own administrator username, password and trusted login source IP.
   Use the IP the server sees, usually your public IP. Passwords are entered
-  invisibly (12–72 bytes, no whitespace; the daemon splits FTP arguments on
+  invisibly (12-72 bytes, no whitespace; the daemon splits FTP arguments on
   whitespace). There is **no preset FTP login** in this installer.
 - Optional IRC server, bot nickname, channel, server password and FiSH key.
   IRC uses TLS with certificate verification. For a private IRC CA, configure
@@ -71,7 +71,7 @@ this is a virtual FTP account, not a new Linux login.
 This pack uses **host networking**. There are no Docker port mappings:
 
 - Allow your chosen FTP control port (default TCP **21212**) to FTP clients.
-- Allow the passive TCP range (default **30000â€“30100**) to FTP/FXP peers on
+- Allow the passive TCP range (default **30000-30100**) to FTP/FXP peers on
   each storage slave. Behind NAT, forward these ports and advertise the public
   IPv4 address; adjust `slave.local_bind_ip` if you need a specific LAN interface.
 - Restrict the slave control port (default TCP **1099**) to your slave IPs.
