@@ -15,6 +15,9 @@ secret() {
   printf '\n'
 }
 yes() { [[ "$1" == [yY] || "$1" == [yY][eE][sS] ]]; }
+pull_setup() {
+  [[ ${WEAVEFTPD_SETUP_PULL:-always} == never ]] || docker pull "$image"
+}
 usage() {
   echo 'Usage: bash docker/setup.sh [--slave-cert NAME]'
   echo 'Guide: https://github.com/WeaveFTPd/WeaveFTPd/blob/main/docker/QUICKSTART.md'
@@ -32,6 +35,7 @@ if [[ ${1:-} == --slave-cert ]]; then
   cert="$deploy/runtime/master/etc/certs/ca.crt"
   [[ -f $cert ]] || { echo 'This installation has no generated master CA.' >&2; exit 1; }
   cert_owner="$(stat -c %u "$cert"):$(stat -c %g "$cert")"
+  pull_setup
   docker run --rm --network none --user "$cert_owner" --mount "type=bind,src=$deploy,dst=/output" \
     --entrypoint weaveftpd-setup "$image" --issue-slave "$2" --slave-ip "$slave_ip"
   exit
@@ -85,6 +89,7 @@ printf '\nRole: %s\nPublic IP: %s\nStorage: %s\nContainer identity: %s:%s\nPassi
 printf 'Image: %s\nTLS: required for FTP; mutual TLS on the slave control link.\n' "$image"
 ask proceed 'Create this NEW installation? (yes/no)' yes
 yes "$proceed" || exit 0
+pull_setup
 
 mounts=(--mount "type=bind,src=$repo,dst=/source,readonly" --mount "type=bind,src=$deploy,dst=/output")
 [[ $role != slave ]] || mounts+=(--mount "type=bind,src=$bundle,dst=/bundle,readonly")
@@ -123,6 +128,7 @@ fi
 printf 'Open only the required FTP/passive ports in your firewall; restrict the control port to slave IPs.\n'
 ask start 'Start the containers now? (yes/no)' yes
 if yes "$start"; then
+  "${compose[@]}" pull
   "${compose[@]}" up -d
   "${compose[@]}" ps
   printf '\nContainers started. Check logs and make a test transfer; startup is not a transfer health check.\n'

@@ -15,6 +15,7 @@ cleanup() {
   result=$?
   if [ "$result" -ne 0 ] && [ -f "$scratch/override.json" ]; then
     "${compose[@]}" logs --no-color master local-slave || true
+    docker logs "$project-remote" 2>/dev/null || true
   fi
   if [ -f "$scratch/override.json" ]; then
     "${compose[@]}" down --remove-orphans || true
@@ -28,6 +29,7 @@ trap cleanup EXIT
 mkdir -p "$scratch/source"
 git -C "$repo" archive HEAD etc plugins sitebot docker | tar -x -C "$scratch/source"
 export WEAVEFTPD_SETUP_IMAGE="$image"
+export WEAVEFTPD_SETUP_PULL=never
 export WEAVEFTPD_UID=$(id -u) WEAVEFTPD_GID=$(id -g)
 # Exercise the actual interactive wizard with a custom account and non-root
 # filesystem identity. No generated configs are replaced with test fixtures.

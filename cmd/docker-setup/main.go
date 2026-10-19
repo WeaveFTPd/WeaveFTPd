@@ -109,7 +109,7 @@ func validate(v values) error {
 			return e
 		}
 	}
-	if !filepath.IsAbs(v["site_path"]) || strings.ContainsAny(v["site_path"], "\x00\r\n") {
+	if filepath.Clean(v["site_path"]) == string(filepath.Separator) || !filepath.IsAbs(v["site_path"]) || strings.ContainsAny(v["site_path"], "\x00\r\n") {
 		return errors.New("site_path must be absolute")
 	}
 	if _, e = time.LoadLocation(v["timezone"]); e != nil {
@@ -127,7 +127,7 @@ func validate(v values) error {
 				return errors.New("sections must be comma-separated names, using letters, numbers, - or _")
 			}
 		}
-		fp, e := number(v, "ftp_port", 1024, 65535)
+		fp, e := number(v, "ftp_port", 1, 65535)
 		if e != nil {
 			return e
 		}
