@@ -55,6 +55,12 @@ slave = dict(common, mode='slave', slave=dict(name='LOCAL', master_host='127.0.0
 (runtime/'etc/config.yml').write_text(json.dumps(master))
 (runtime/'etc/config-slave-local.yml').write_text(json.dumps(slave))
 (runtime/'site/SMOKE/Container.Test-GRP').mkdir(parents=True, exist_ok=True)
+# The bundled siteop has flag 1 only. Give this isolated test fixture download
+# access (flag 3) and ratio 0 so payload verification does not depend on credits.
+userfile = runtime/'etc/users/weaveftpd'
+record = userfile.read_text()
+assert 'FLAGS 1\n' in record and 'RATIO 3\n' in record
+userfile.write_text(record.replace('FLAGS 1\n', 'FLAGS 13\n').replace('RATIO 3\n', 'RATIO 0\n'))
 override.write_text(json.dumps(dict(services={
     'master': dict(container_name=project+'-master'),
     'local-slave': dict(container_name=project+'-slave'),
