@@ -138,9 +138,23 @@ func TestRemoteCertificate(t *testing.T) {
 	if _, e := os.Stat(filepath.Join(bundle, "ca.key")); !os.IsNotExist(e) {
 		t.Fatal("CA private key leaked into bundle")
 	}
+	pool := x509.NewCertPool()
+	pool.AppendCertsFromPEM(mustRead(t, filepath.Join(bundle, "ca.crt")))
+	clientPair, err := tls.LoadX509KeyPair(filepath.Join(bundle, "client.crt"), filepath.Join(bundle, "client.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := x509.ParseCertificate(clientPair.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client.Verify(x509.VerifyOptions{Roots: pool, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}); err == nil {
+		t.Fatal("slave client identity can impersonate a server")
+	}
 	v["role"] = "slave"
 	v["slave_name"] = "REMOTE1"
 	v["master_host"] = "127.0.0.1"
+	v["public_ip"] = "192.0.2.20"
 	v["bundle"] = bundle
 	remote := t.TempDir()
 	if e := setup(input(v), source, remote); e != nil {

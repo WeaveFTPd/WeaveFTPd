@@ -4,6 +4,7 @@ package main
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -526,7 +527,26 @@ func remoteFiles(source, stage string, v values) error {
 	if _, e = c.Verify(x509.VerifyOptions{Roots: pool, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}); e != nil {
 		return e
 	}
-	for name, b := range map[string][]byte{"ca.crt": ca, "client.crt": cert, "client.key": key, "server.crt": cert, "server.key": key} {
+	serverCert, e := os.ReadFile(filepath.Join(v["bundle"], "server.crt"))
+	if e != nil {
+		return e
+	}
+	serverKey, e := os.ReadFile(filepath.Join(v["bundle"], "server.key"))
+	if e != nil {
+		return e
+	}
+	pair, e := tls.X509KeyPair(serverCert, serverKey)
+	if e != nil {
+		return e
+	}
+	server, e := x509.ParseCertificate(pair.Certificate[0])
+	if e != nil {
+		return e
+	}
+	if _, e = server.Verify(x509.VerifyOptions{Roots: pool, DNSName: v["public_ip"], KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}); e != nil {
+		return e
+	}
+	for name, b := range map[string][]byte{"ca.crt": ca, "client.crt": cert, "client.key": key, "server.crt": serverCert, "server.key": serverKey} {
 		if e = writeNew(filepath.Join(stage, "etc/certs", name), b, 0600); e != nil {
 			return e
 		}
@@ -612,22 +632,14 @@ func issueSlave(output, name, ip string) error {
 		return e
 	}
 	c := newCert(name, false)
-	serverPEM, err := os.ReadFile(filepath.Join(dir, "server.crt"))
-	if err != nil {
-		return err
-	}
-	serverBlock, _ := pem.Decode(serverPEM)
-	if serverBlock == nil {
-		return errors.New("invalid master server certificate")
-	}
-	server, err := x509.ParseCertificate(serverBlock.Bytes)
-	if err != nil {
-		return err
-	}
-	c.IPAddresses = append(server.IPAddresses, net.ParseIP(ip))
-	c.DNSNames = server.DNSNames
-	c.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth}
+	c.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
 	if _, e = signCert(target, "client", c, ca, key); e != nil {
+		return e
+	}
+	server := newCert(name+" data", false)
+	server.IPAddresses = []net.IP{net.ParseIP(ip)}
+	server.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
+	if _, e = signCert(target, "server", server, ca, key); e != nil {
 		return e
 	}
 	if e = writeNew(filepath.Join(target, "ca.crt"), cb, 0600); e != nil {

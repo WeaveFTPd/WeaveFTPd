@@ -82,7 +82,7 @@ if [[ $role == master ]]; then
 else
   ask master_host 'Master address (must match its TLS certificate; use its public IPv4)'
   ask slave_name 'Unique slave name (not LOCAL)' SLAVE1
-  ask bundle 'Absolute path to certificate bundle containing ca.crt, client.crt, client.key'
+  ask bundle 'Absolute path to certificate bundle containing ca.crt, client.crt/key and server.crt/key'
   [[ $bundle == /* && -d $bundle ]] || { echo 'Certificate bundle directory is missing.' >&2; exit 1; }
 fi
 printf '\nRole: %s\nPublic IP: %s\nStorage: %s\nContainer identity: %s:%s\nPassive ports: %s-%s\n' "$role" "$public_ip" "$site_path" "$uid" "$gid" "$pasv_min" "$pasv_max"
@@ -121,7 +121,7 @@ compose=(docker compose --env-file "$role.env" -f "$file")
 section_names=()
 [[ -z $sections ]] || IFS=, read -r -a section_names <<< "$sections"
 "${compose[@]}" run --rm --no-deps --entrypoint sh "$([[ $role == master ]] && echo local-slave || echo slave)" \
-  -ec 'probe=$(mktemp /app/site/.weaveftpd-write-check.XXXXXX); rm -- "$probe"; for section; do mkdir -p -- "/app/site/$section"; done' -- "${section_names[@]}" >/dev/null
+  -ec 'probe=$(mktemp /app/site/.weaveftpd-write-check.XXXXXX); rm -- "$probe"; for section; do mkdir -p -- "/app/site/$section"; done' -- "${section_names[@]}" </dev/null >/dev/null
 printf '\nSettings: %s/runtime/%s\n' "$deploy" "$role"
 if [[ $role == master ]]; then
   printf 'Trust runtime/master/etc/certs/ca.crt in your FTPS client. Login: %s on port %s.\n' "$admin" "$ftp_port"

@@ -145,8 +145,10 @@ bash docker/setup.sh --slave-cert REMOTE1
 Enter the remote slave's public IPv4 when prompted (included in its data-TLS certificate).
 Securely copy **only** the generated
 `docker/deploy/runtime/master/slave-certs/REMOTE1/` directory to the remote
-machine, for example `/root/REMOTE1/`. It contains `ca.crt`, `client.crt` and
-`client.key`. **Never copy the master CA private key (`ca.key`).** Restrict
+machine, for example `/root/REMOTE1/`. It contains `ca.crt`, `client.crt`, `client.key`, `server.crt` and `server.key`.
+Client identity and data-server identity use separate keys and certificate purposes.
+The data-server certificate covers that slave's public IPv4; clients verifying data
+TLS must verify the slave address, not the master address. **Never copy the master CA private key (`ca.key`).** Restrict
 the bundle's permissions and treat it as a credential.
 
 Clone this repository on the slave and run `bash docker/setup.sh`. Choose
