@@ -28,8 +28,12 @@ if ! docker info >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; th
 fi
 if [[ ${1:-} == --slave-cert ]]; then
   [[ $# == 2 ]] || { usage; exit 1; }
-  docker run --rm --network none --user 0:0 --mount "type=bind,src=$deploy,dst=/output" \
-    --entrypoint weaveftpd-setup "$image" --issue-slave "$2"
+  ask slave_ip "Remote slave public IPv4 address"
+  cert="$deploy/runtime/master/etc/certs/ca.crt"
+  [[ -f $cert ]] || { echo 'This installation has no generated master CA.' >&2; exit 1; }
+  cert_owner="$(stat -c %u "$cert"):$(stat -c %g "$cert")"
+  docker run --rm --network none --user "$cert_owner" --mount "type=bind,src=$deploy,dst=/output" \
+    --entrypoint weaveftpd-setup "$image" --issue-slave "$2" --slave-ip "$slave_ip"
   exit
 elif [[ $# != 0 ]]; then usage; exit 1; fi
 

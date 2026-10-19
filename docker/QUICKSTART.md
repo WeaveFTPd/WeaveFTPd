@@ -140,6 +140,7 @@ cd /path/to/WeaveFTPd
 bash docker/setup.sh --slave-cert REMOTE1
 ```
 
+Enter the remote slave's public IPv4 when prompted (included in its data-TLS certificate).
 Securely copy **only** the generated
 `docker/deploy/runtime/master/slave-certs/REMOTE1/` directory to the remote
 machine, for example `/root/REMOTE1/`. It contains `ca.crt`, `client.crt` and

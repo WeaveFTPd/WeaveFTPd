@@ -33,10 +33,11 @@ func main() {
 	source := flag.String("source", "/source", "read-only public source templates")
 	output := flag.String("output", "/output", "host deployment directory")
 	issue := flag.String("issue-slave", "", "issue a named slave certificate from this master CA")
+	slaveIP := flag.String("slave-ip", "", "public IPv4 address of the slave certificate")
 	flag.Parse()
 	var err error
 	if *issue != "" {
-		err = issueSlave(*output, *issue)
+		err = issueSlave(*output, *issue, *slaveIP)
 	} else {
 		err = setup(os.Stdin, *source, *output)
 	}
@@ -557,7 +558,10 @@ func createCA(dir, ip string) error {
 	_, e = signCert(dir, "client", client, ca, key)
 	return e
 }
-func issueSlave(output, name string) error {
+func issueSlave(output, name, ip string) error {
+	if net.ParseIP(ip).To4() == nil {
+		return errors.New("slave-ip must be the slave public IPv4 address")
+	}
 	if !safeName.MatchString(name) || strings.EqualFold(name, "LOCAL") {
 		return errors.New("invalid remote slave name")
 	}
@@ -591,6 +595,20 @@ func issueSlave(output, name string) error {
 		return e
 	}
 	c := newCert(name, false)
+	serverPEM, err := os.ReadFile(filepath.Join(dir, "server.crt"))
+	if err != nil {
+		return err
+	}
+	serverBlock, _ := pem.Decode(serverPEM)
+	if serverBlock == nil {
+		return errors.New("invalid master server certificate")
+	}
+	server, err := x509.ParseCertificate(serverBlock.Bytes)
+	if err != nil {
+		return err
+	}
+	c.IPAddresses = append(server.IPAddresses, net.ParseIP(ip))
+	c.DNSNames = server.DNSNames
 	c.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth}
 	if _, e = signCert(target, "client", c, ca, key); e != nil {
 		return e

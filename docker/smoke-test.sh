@@ -19,6 +19,7 @@ cleanup() {
   if [ -f "$scratch/override.json" ]; then
     "${compose[@]}" down --remove-orphans || true
   fi
+  docker rm -f "$project-remote" >/dev/null 2>&1 || true
   rm -rf -- "$scratch"
   exit "$result"
 }
@@ -62,7 +63,7 @@ assert s['master']['image'] == s['local-slave']['image'], 'both roles must use t
 PY
 "${compose[@]}" up -d master local-slave
 
-python3 - "$WEAVEFTPD_RUNTIME" <<'PY'
+cat > "$scratch/transfer.py" <<'PY'
 import ftplib, io, ssl, sys, time, zlib
 from pathlib import Path
 runtime = Path(sys.argv[1])
@@ -106,3 +107,22 @@ ftp.quit()
 assert not (runtime/'site/TEST/Container.Test-GRP/container-smoke.bin').exists(), 'delete did not reach the slave'
 print('PASS: interactive installer, preserved settings, custom admin, non-root containers, mutual TLS, FTP TLS login/list/upload/download/delete')
 PY
+
+python3 "$scratch/transfer.py" "$WEAVEFTPD_RUNTIME"
+
+# Verify the remote-slave branch of the wizard and its issued certificate too.
+printf '127.0.0.1\n' | bash "$scratch/source/docker/setup.sh" --slave-cert REMOTE1
+remote="$scratch/source/docker/deploy/runtime/slave"
+printf '%s\n' slave 127.0.0.1 "$remote/site" UTC 21099 42200 42209 \
+  "$WEAVEFTPD_UID" "$WEAVEFTPD_GID" 127.0.0.1 REMOTE1 \
+  "$WEAVEFTPD_RUNTIME/slave-certs/REMOTE1" yes no | \
+  bash "$scratch/source/docker/setup.sh"
+mkdir -p "$remote/site/TEST/Container.Test-GRP"
+"${compose[@]}" stop local-slave
+docker run -d --name "$project-remote" --network host \
+  --user "$WEAVEFTPD_UID:$WEAVEFTPD_GID" \
+  --mount "type=bind,src=$remote/etc,dst=/app/etc" \
+  --mount "type=bind,src=$remote/site,dst=/app/site" \
+  --mount "type=bind,src=$remote/logs,dst=/app/logs" "$image"
+python3 "$scratch/transfer.py" "$remote"
+echo 'PASS: remote slave wizard, issued certificate, TLS upload/download/delete'

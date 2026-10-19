@@ -125,7 +125,7 @@ func TestRemoteCertificate(t *testing.T) {
 	if e := setup(input(v), source, out); e != nil {
 		t.Fatal(e)
 	}
-	if e := issueSlave(out, "REMOTE1"); e != nil {
+	if e := issueSlave(out, "REMOTE1", "192.0.2.20"); e != nil {
 		t.Fatal(e)
 	}
 	bundle := filepath.Join(out, "runtime/master/slave-certs/REMOTE1")
@@ -144,7 +144,7 @@ func TestRemoteCertificate(t *testing.T) {
 	if e := setup(input(v), source, t.TempDir()); e == nil {
 		t.Fatal("mismatched certificate accepted")
 	}
-	if e := issueSlave(out, "REMOTE1"); e == nil {
+	if e := issueSlave(out, "REMOTE1", "192.0.2.20"); e == nil {
 		t.Fatal("existing bundle replaced")
 	}
 }
