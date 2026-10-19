@@ -54,7 +54,7 @@ slave = dict(common, mode='slave', slave=dict(name='LOCAL', master_host='127.0.0
 # JSON is valid YAML; no Python YAML package is required on the runner.
 (runtime/'etc/config.yml').write_text(json.dumps(master))
 (runtime/'etc/config-slave-local.yml').write_text(json.dumps(slave))
-(runtime/'site/SMOKE').mkdir(exist_ok=True)
+(runtime/'site/SMOKE/Container.Test-GRP').mkdir(parents=True, exist_ok=True)
 override.write_text(json.dumps(dict(services={
     'master': dict(container_name=project+'-master'),
     'local-slave': dict(container_name=project+'-slave'),
@@ -72,7 +72,7 @@ PY
 "${compose[@]}" up -d master local-slave
 
 python3 - "$WEAVEFTPD_RUNTIME" <<'PY'
-import ftplib, io, ssl, sys, time
+import ftplib, io, ssl, sys, time, zlib
 from pathlib import Path
 runtime = Path(sys.argv[1])
 context = ssl._create_unverified_context()  # Isolated loopback fixture certificate.
@@ -90,7 +90,7 @@ while time.monotonic() < deadline:
         ftp.connect('127.0.0.1', 22121)
         ftp.login('weaveftpd', 'weaveftpd')
         ftp.prot_p()
-        ftp.cwd('/SMOKE')
+        ftp.cwd('/SMOKE/Container.Test-GRP')
         ftp.nlst()  # Requires the storage slave to be connected and ready.
         break
     except (OSError, ftplib.Error) as exc:
@@ -101,14 +101,17 @@ else:
     raise RuntimeError(f'Master/slave did not become ready: {last_error}')
 
 payload = b'WeaveFTPd container TLS transfer test\n' * 8192
+sfv = f'container-smoke.bin {zlib.crc32(payload):08X}\n'.encode()
+ftp.storbinary('STOR container-smoke.sfv', io.BytesIO(sfv))
 ftp.storbinary('STOR container-smoke.bin', io.BytesIO(payload))
 received = io.BytesIO()
 ftp.retrbinary('RETR container-smoke.bin', received.write)
 assert received.getvalue() == payload, 'download differs from upload'
-assert (runtime/'site/SMOKE/container-smoke.bin').read_bytes() == payload
+assert (runtime/'site/SMOKE/Container.Test-GRP/container-smoke.bin').read_bytes() == payload
 assert 'container-smoke.bin' in ftp.nlst()
 ftp.delete('container-smoke.bin')
+ftp.delete('container-smoke.sfv')
 ftp.quit()
-assert not (runtime/'site/SMOKE/container-smoke.bin').exists(), 'delete did not reach the slave'
+assert not (runtime/'site/SMOKE/Container.Test-GRP/container-smoke.bin').exists(), 'delete did not reach the slave'
 print('PASS: shared image, default local slave, FTP TLS login/list/upload/download/delete')
 PY
