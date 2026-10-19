@@ -32,7 +32,7 @@ export WEAVEFTPD_UID=$(id -u) WEAVEFTPD_GID=$(id -g)
 # Exercise the actual interactive wizard with a custom account and non-root
 # filesystem identity. No generated configs are replaced with test fixtures.
 printf '%s\n' master 127.0.0.1 "$WEAVEFTPD_SITE_PATH" UTC 21099 42130 42139 \
-  "$WEAVEFTPD_UID" "$WEAVEFTPD_GID" 22121 SmokeAdmin 127.0.0.1 \
+  "$WEAVEFTPD_UID" "$WEAVEFTPD_GID" 22121 TEST SmokeAdmin 127.0.0.1 \
   'Smoke test password 42!' 'Smoke test password 42!' no yes no | \
   bash "$scratch/source/docker/setup.sh"
 printf '%s\n' '# preserve custom settings on rerun' >> "$WEAVEFTPD_RUNTIME/etc/config.yml"
@@ -46,7 +46,6 @@ python3 - "$WEAVEFTPD_RUNTIME" "$scratch/override.json" "$project" <<'PY'
 import json, sys
 from pathlib import Path
 runtime, override, project = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
-(runtime/'site/TEST/Container.Test-GRP').mkdir(parents=True, exist_ok=True)
 override.write_text(json.dumps(dict(services={
     'master': dict(container_name=project+'-master'),
     'local-slave': dict(container_name=project+'-slave'),
@@ -82,7 +81,13 @@ while time.monotonic() < deadline:
         ftp.connect('127.0.0.1', 22121)
         ftp.login('SmokeAdmin', 'Smoke test password 42!')
         ftp.prot_p()
-        ftp.cwd('/TEST/Container.Test-GRP')
+        ftp.cwd('/TEST')
+        try:
+            ftp.mkd('Container.Test-GRP')
+        except ftplib.error_perm as exc:
+            if not str(exc).startswith('550'):
+                raise
+        ftp.cwd('Container.Test-GRP')
         ftp.nlst()  # Requires the storage slave to be connected and ready.
         break
     except (OSError, ftplib.Error) as exc:

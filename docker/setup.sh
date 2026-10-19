@@ -55,9 +55,10 @@ ask pasv_max 'Passive data ports: last' 30100
 printf '\nContainer filesystem identity (0:0 = root for storage compatibility).\nAn existing storage tree is never recursively chowned.\n'
 ask uid 'Container UID' 0
 ask gid 'Container GID' 0
-admin= password= admin_ip= ftp_port= irc_host= irc_port=6697 irc_nick=WeaveBot irc_channel= irc_password= fish_key= master_host= slave_name= bundle=
+sections= admin= password= admin_ip= ftp_port= irc_host= irc_port=6697 irc_nick=WeaveBot irc_channel= irc_password= fish_key= master_host= slave_name= bundle=
 if [[ $role == master ]]; then
   ask ftp_port 'FTP control TCP port' 21212
+  ask sections 'Sections (comma-separated, no spaces)' TEST
   ask admin 'New administrator username' admin
   ask admin_ip 'Trusted administrator source IP (as seen by this server)'
   secret password 'New administrator password (12..72 bytes)'
@@ -89,7 +90,7 @@ mounts=(--mount "type=bind,src=$repo,dst=/source,readonly" --mount "type=bind,sr
 [[ $role != slave ]] || mounts+=(--mount "type=bind,src=$bundle,dst=/bundle,readonly")
 # Passwords travel through stdin, never command arguments or environment.
 {
-  for key in role public_ip ftp_port control_port pasv_min pasv_max site_path admin password admin_ip timezone uid gid irc_host irc_port irc_nick irc_channel irc_password fish_key master_host slave_name; do
+  for key in role public_ip ftp_port control_port pasv_min pasv_max site_path admin password admin_ip timezone uid gid irc_host irc_port irc_nick irc_channel irc_password fish_key master_host slave_name sections; do
     printf '%s=%s\0' "$key" "${!key}"
   done
   printf 'image=%s\0sitebot_image=%s\0bundle=%s\0' "$image" "$sitebot_image" "${bundle:+/bundle}"
@@ -110,12 +111,14 @@ file=master-sitebot.compose.yml
 compose=(docker compose --env-file "$role.env" -f "$file")
 "${compose[@]}" config --quiet
 # This also catches read-only mounts / wrong ownership before starting services.
+section_names=()
+[[ -z $sections ]] || IFS=, read -r -a section_names <<< "$sections"
 "${compose[@]}" run --rm --no-deps --entrypoint sh "$([[ $role == master ]] && echo local-slave || echo slave)" \
-  -c 'probe=$(mktemp /app/site/.weaveftpd-write-check.XXXXXX) && rm -- "$probe"' >/dev/null
+  -ec 'probe=$(mktemp /app/site/.weaveftpd-write-check.XXXXXX); rm -- "$probe"; for section; do mkdir -p -- "/app/site/$section"; done' -- "${section_names[@]}" >/dev/null
 printf '\nSettings: %s/runtime/%s\n' "$deploy" "$role"
 if [[ $role == master ]]; then
   printf 'Trust runtime/master/etc/certs/ca.crt in your FTPS client. Login: %s on port %s.\n' "$admin" "$ftp_port"
-  printf 'Create section directories inside storage (for example TEST), then upload releases underneath.\n'
+  printf 'Sections created: %s. Upload release directories underneath them.\n' "$sections"
 fi
 printf 'Open only the required FTP/passive ports in your firewall; restrict the control port to slave IPs.\n'
 ask start 'Start the containers now? (yes/no)' yes

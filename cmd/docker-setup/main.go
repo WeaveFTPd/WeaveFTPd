@@ -56,7 +56,7 @@ func readValues(r io.Reader) (values, error) {
 		return nil, errors.New("input too large")
 	}
 	v := values{}
-	allowed := " role public_ip ftp_port control_port pasv_min pasv_max site_path admin password admin_ip timezone uid gid irc_host irc_port irc_nick irc_channel irc_password fish_key master_host slave_name image sitebot_image bundle "
+	allowed := " role public_ip ftp_port control_port pasv_min pasv_max site_path admin password admin_ip timezone uid gid irc_host irc_port irc_nick irc_channel irc_password fish_key master_host slave_name image sitebot_image bundle sections "
 	for _, s := range strings.Split(string(b), "\x00") {
 		if s == "" {
 			continue
@@ -119,6 +119,14 @@ func validate(v values) error {
 		return errors.New("missing image references")
 	}
 	if v["role"] == "master" {
+		if v["sections"] == "" {
+			v["sections"] = "TEST"
+		}
+		for _, section := range strings.Split(v["sections"], ",") {
+			if !safeName.MatchString(section) {
+				return errors.New("sections must be comma-separated names, using letters, numbers, - or _")
+			}
+		}
 		fp, e := number(v, "ftp_port", 1024, 65535)
 		if e != nil {
 			return e
@@ -362,6 +370,7 @@ func masterFiles(source, stage string, v values) error {
 	for k, val := range map[string]any{"mode": "master", "storage_path": "/app/site", "rootpath": "/", "datapath": "/app/userdata", "acl_base_path": "/", "passwd_file": "/app/etc/passwd", "msg_path": "/app/etc/msgs", "event_fifo": "/app/etc/weaveftpd.sitebot.fifo", "sitebot_config": "/app/sitebot/etc/config.yml", "listen_port": port(v, "ftp_port"), "public_ip": v["public_ip"], "pasv_min": port(v, "pasv_min"), "pasv_max": port(v, "pasv_max"), "passthrough": true, "require_tls_control": true, "require_tls_data": true} {
 		m[k] = val
 	}
+	m["sections"] = strings.Split(v["sections"], ",")
 	master := block(m, "master")
 	master["control_port"] = port(v, "control_port")
 	master["listen_host"] = "0.0.0.0"

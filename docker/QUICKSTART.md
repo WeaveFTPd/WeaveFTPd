@@ -20,6 +20,7 @@ Choose **master** for a complete server. The wizard asks for:
 - Container UID/GID. `0:0` runs as root for filesystem compatibility; choose a
   dedicated host UID/GID if you prefer. That identity must have read/write
   access to existing storage. Existing storage is never recursively chowned.
+- Section names (comma-separated; default `TEST`). These directories are created in storage.
 - Your own administrator username, password and trusted login source IP.
   Use the IP the server sees, usually your public IP. Passwords are entered
   invisibly. There is **no preset FTP login** in this installer.
@@ -84,9 +85,9 @@ certificate covers the public IPv4 address and localhost; using another DNS
 name requires a matching replacement certificate. Certificates expire after
 five years; replace/renew them before expiry.
 
-Create a section directory in the selected host storage, such as `TEST`, and
-upload releases underneath it (`/TEST/Example.Release-GRP`). Configure your own
-section names in `etc/config.yml`. FXP clients should use PRET to select a slave
+Upload releases underneath a section selected during setup, such as
+`/TEST/Example.Release-GRP`. To add sections later, configure them in
+`etc/config.yml` and reload the master (or create directories and run SITE REMERGE). FXP clients should use PRET to select a slave
 before the passive data connection.
 
 Check startup and make an upload/download test:
