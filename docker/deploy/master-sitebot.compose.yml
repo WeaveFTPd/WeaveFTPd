@@ -3,12 +3,12 @@
 # Runs the master daemon and sitebot on the same host. That is intentional:
 # the sitebot reads a local FIFO created in the shared etc volume.
 #
-# Optional same-box slave:
-#   docker compose --env-file master.env -f master-sitebot.compose.yml --profile local-slave up -d
+# Master + local storage slave + sitebot start together:
+#   docker compose --env-file master.env -f master-sitebot.compose.yml up -d
 
 services:
   master:
-    image: ${WEAVEFTPD_IMAGE:-weaveftpd:latest}
+    image: ${WEAVEFTPD_IMAGE:-ghcr.io/weaveftpd/weaveftpd:latest}
     container_name: weaveftpd-master
     network_mode: host
     restart: unless-stopped
@@ -27,7 +27,7 @@ services:
     command: ["--config", "/app/etc/config.yml"]
 
   sitebot:
-    image: ${WEAVEFTPD_SITEBOT_IMAGE:-weaveftpd-sitebot:latest}
+    image: ${WEAVEFTPD_SITEBOT_IMAGE:-ghcr.io/weaveftpd/weaveftpd-sitebot:latest}
     container_name: weaveftpd-sitebot
     network_mode: host
     restart: unless-stopped
@@ -40,11 +40,10 @@ services:
     command: ["--config", "/app/sitebot/etc/config.yml"]
 
   local-slave:
-    image: ${WEAVEFTPD_IMAGE:-weaveftpd:latest}
+    image: ${WEAVEFTPD_IMAGE:-ghcr.io/weaveftpd/weaveftpd:latest}
     container_name: weaveftpd-local-slave
     network_mode: host
     restart: unless-stopped
-    profiles: ["local-slave"]
     user: "${WEAVEFTPD_UID:-0}:${WEAVEFTPD_GID:-0}"
     depends_on:
       - master

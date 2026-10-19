@@ -5,7 +5,7 @@
 
 services:
   slave:
-    image: ${WEAVEFTPD_IMAGE:-weaveftpd:latest}
+    image: ${WEAVEFTPD_IMAGE:-ghcr.io/weaveftpd/weaveftpd:latest}
     container_name: weaveftpd-slave
     network_mode: host
     restart: unless-stopped

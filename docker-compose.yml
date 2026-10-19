@@ -10,7 +10,7 @@ services:
     build:
       context: .
       target: daemon
-    image: ${WEAVEFTPD_IMAGE:-weaveftpd:latest}
+    image: ${WEAVEFTPD_IMAGE:-ghcr.io/weaveftpd/weaveftpd:latest}
     container_name: weaveftpd-master
     network_mode: host
     restart: unless-stopped
@@ -28,17 +28,15 @@ services:
       - ./sitebot:/app/sitebot:ro
     command: ["--config", "/app/etc/config.yml"]
 
-  # Start explicitly on a slave box:
-  #   docker compose --profile slave up -d slave
+  # The local storage slave starts with the master by default.
   slave:
     build:
       context: .
       target: daemon
-    image: ${WEAVEFTPD_IMAGE:-weaveftpd:latest}
+    image: ${WEAVEFTPD_IMAGE:-ghcr.io/weaveftpd/weaveftpd:latest}
     container_name: weaveftpd-slave
     network_mode: host
     restart: unless-stopped
-    profiles: ["slave"]
     user: "${WEAVEFTPD_UID:-0}:${WEAVEFTPD_GID:-0}"
     ulimits:
       nofile:
@@ -57,7 +55,7 @@ services:
     build:
       context: .
       target: sitebot
-    image: ${WEAVEFTPD_SITEBOT_IMAGE:-weaveftpd-sitebot:latest}
+    image: ${WEAVEFTPD_SITEBOT_IMAGE:-ghcr.io/weaveftpd/weaveftpd-sitebot:latest}
     container_name: weaveftpd-sitebot
     network_mode: host
     restart: unless-stopped

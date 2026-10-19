@@ -3,6 +3,9 @@
 .gomodcache
 .agents
 .codex
+.gotmp
+backups
+backup
 
 # Runtime state and large local data
 logs
@@ -34,6 +37,7 @@ etc/groups-
 sitebot/etc/config.yml
 sitebot/etc/certs
 sitebot/plugins/*/config.yml
+plugins/*/config.yml
 sitebot/logs
 docker/deploy/master.env
 docker/deploy/slave.env
