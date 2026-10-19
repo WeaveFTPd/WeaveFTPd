@@ -226,124 +226,60 @@ daemon.
 
 ## Docker
 
-Docker support is optional. Build the images from a local checkout on each
-machine, then run the master, slave, and sitebot containers from those local
-images.
+GitHub Actions builds and publishes Linux amd64 images to GHCR automatically:
 
-For the easiest production-style setup, use the deploy pack in
-`docker/deploy/`. It creates runtime directories, copies config templates,
-patches container paths, and keeps master/sitebot/slave layouts separated:
+| Image | Use |
+|-------|-----|
+| `ghcr.io/weaveftpd/weaveftpd:latest` | Both master and slave; the config selects the role |
+| `ghcr.io/weaveftpd/weaveftpd-sitebot:latest` | IRC announce bot |
+
+Pushes to `main` update `:latest` and `:main`; pushes to `dev` update `:dev`.
+Version tags such as `v1.3.0` also publish `:v1.3.0`, `:1.3.0` and `:1.3`.
+Each build has a `:sha-<full-commit>` tag. Pull requests build and test without
+publishing. The workflow tests a master and slave together, including an
+encrypted upload and download, before publishing the daemon image.
+
+Master and slave use **one image and two containers**. The master manages FTP
+control and metadata; the slave stores and transfers the files. The standard
+Compose setup starts both together; a master alone cannot serve stored files.
+
+On a Linux Docker host, initialize a new installation:
 
 ```bash
 cd docker/deploy
-./init.sh master
-docker compose --env-file master.env -f master-sitebot.compose.yml up -d master sitebot
+sh init.sh master
 ```
 
-For a remote slave machine:
+Edit `runtime/master/etc/config.yml` (public IP and ports),
+`runtime/master/etc/config-slave-local.yml` (slave public IP/passive ports), and
+`runtime/master/sitebot/etc/config.yml` (IRC settings). Change the bundled
+example account password before exposing the server.
+
+Start master, local slave and sitebot with one command:
 
 ```bash
-cd docker/deploy
-MASTER_HOST="203.0.113.10" SLAVE_NAME="SLAVE1" ./init.sh slave
-docker compose --env-file slave.env -f slave.compose.yml up -d slave
+docker compose --env-file master.env -f master-sitebot.compose.yml up -d
+docker compose --env-file master.env -f master-sitebot.compose.yml logs -f
 ```
 
-Before starting a mask-authenticated remote slave, register its source address
-on the master with `SITE SLAVE SLAVE1 ADDMASK <ip-or-cidr>`. The local-slave
-Docker profile is initialized with a `LOCAL 127.0.0.1` mask automatically.
+The setup prepares configs, a TLS certificate, runtime directories, and the
+`LOCAL 127.0.0.1` slave mask. Both daemon containers use the same published
+image with separate config files. Configs, accounts, certificates, databases,
+logs and site data remain mounted on the host across image updates.
 
-The sitebot should run on the master machine. It reads a local FIFO, so putting
-it in a separate container is fine only when both master and sitebot mount the
-same host directory at `/app/etc`. Remote slaves do not need that FIFO.
-
-The included `Dockerfile` has two targets:
-
-| Target | Binary | Use |
-|--------|--------|-----|
-| `daemon` | `weaveftpd` | master or slave daemon |
-| `sitebot` | `sitebot` | IRC announce bot |
-
-The compose file uses host networking because FTP passive ports, FXP peer
-checks, and PASV/CPSV address announcements are much simpler when the container
-uses the host network stack. This is meant for Linux servers.
-
-Prepare runtime configs on the host first:
+To update, wait until transfers are idle, then run:
 
 ```bash
-cp etc/config-example.yml etc/config.yml
-cp etc/config-slave-example.yml etc/config-slave.yml
-cp sitebot/etc/config.yml.example sitebot/etc/config.yml
+docker compose --env-file master.env -f master-sitebot.compose.yml pull
+docker compose --env-file master.env -f master-sitebot.compose.yml up -d
 ```
 
-When running in Docker, paths inside the container start at `/app`. At minimum,
-adjust these config values:
+Publishing an image does not restart existing installations. Existing
+`master.env` / `slave.env` files are preserved by `init.sh`; switch their image
+values to the GHCR names above if they still refer to local images.
 
-```yaml
-# etc/config.yml
-event_fifo: "/app/etc/weaveftpd.sitebot.fifo"
-sitebot_config: "/app/sitebot/etc/config.yml"
-
-# sitebot/etc/config.yml
-event_fifo: "/app/etc/weaveftpd.sitebot.fifo"
-```
-
-For a simple master using `./site` as storage, set roots and cert paths to
-container paths too:
-
-```yaml
-tls_cert: "/app/etc/certs/server.crt"
-tls_key: "/app/etc/certs/server.key"
-storage_path: "/app/site"
-```
-
-For a slave, make `slave.roots` match the compose volume mount:
-
-```yaml
-slave:
-  roots:
-    - "/app/site"
-```
-
-Build locally:
-
-```bash
-docker compose build
-```
-
-Run master only:
-
-```bash
-docker compose up -d master
-docker compose logs -f master
-```
-
-Run master plus sitebot:
-
-```bash
-docker compose --profile sitebot up -d master sitebot
-docker compose logs -f master sitebot
-```
-
-Run only the slave service on a slave box:
-
-```bash
-docker compose --profile slave up -d slave
-docker compose logs -f slave
-```
-
-The compose file defaults to running as root inside the container so existing
-bind-mounted `etc`, `logs`, `userdata`, and `site` directories keep working
-without permission surprises. To run as your host user instead, make the mounted
-directories writable by that user and set:
-
-```bash
-export WEAVEFTPD_UID="$(id -u)"
-export WEAVEFTPD_GID="$(id -g)"
-docker compose up -d master
-```
-
-Keep real configs, certs, user files, logs, and site data mounted from the host.
-Do not bake them into the image.
+For a separate slave host, pinned image versions, manual builds, networking,
+and permissions, see the [Docker deploy guide](docker/deploy/README.md).
 
 ## Configuration
 
