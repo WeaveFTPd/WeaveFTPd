@@ -54,6 +54,9 @@ slaves' passive ports are reachable.
 
 ## Quick Start
 
+For Docker, use the **[interactive Docker quickstart](docker/QUICKSTART.md)**.
+The commands below are for a native build.
+
 ```bash
 ./setup.sh build
 ./setup.sh certs "My FTPd"
@@ -243,43 +246,25 @@ Master and slave use **one image and two containers**. The master manages FTP
 control and metadata; the slave stores and transfers the files. The standard
 Compose setup starts both together; a master alone cannot serve stored files.
 
-On a Linux Docker host, initialize a new installation:
+Install on a **Linux x86_64 host with Docker Engine and Compose v2**:
 
 ```bash
-cd docker/deploy
-sh init.sh master
+git clone https://github.com/WeaveFTPd/WeaveFTPd.git
+cd WeaveFTPd
+bash docker/setup.sh
 ```
 
-Edit `runtime/master/etc/config.yml` (public IP and ports),
-`runtime/master/etc/config-slave-local.yml` (slave public IP/passive ports), and
-`runtime/master/sitebot/etc/config.yml` (IRC settings). Change the bundled
-example account password before exposing the server.
+The interactive installer asks for IP/ports, storage, your own administrator
+login and optional IRC settings. It creates unique TLS certificates, configures
+mutual TLS between master and slave, and starts both daemon containers. The IRC
+bot starts only if you enable it. There is no default FTP password in this flow.
+Existing runtime directories and settings are never overwritten by the wizard.
 
-Start master, local slave and sitebot with one command:
+**[Docker quickstart: first login, firewall, settings, updates and remote slaves](docker/QUICKSTART.md)**
 
-```bash
-docker compose --env-file master.env -f master-sitebot.compose.yml up -d
-docker compose --env-file master.env -f master-sitebot.compose.yml logs -f
-```
-
-The setup prepares configs, a TLS certificate, runtime directories, and the
-`LOCAL 127.0.0.1` slave mask. Both daemon containers use the same published
-image with separate config files. Configs, accounts, certificates, databases,
-logs and site data remain mounted on the host across image updates.
-
-To update, wait until transfers are idle, then run:
-
-```bash
-docker compose --env-file master.env -f master-sitebot.compose.yml pull
-docker compose --env-file master.env -f master-sitebot.compose.yml up -d
-```
-
-Publishing an image does not restart existing installations. Existing
-`master.env` / `slave.env` files are preserved by `init.sh`; switch their image
-values to the GHCR names above if they still refer to local images.
-
-For a separate slave host, pinned image versions, manual builds, networking,
-and permissions, see the [Docker deploy guide](docker/deploy/README.md).
+The same guide is linked in the GHCR image descriptions. Pulling an image alone
+downloads the program; use the installer/Compose files to configure and run it.
+For manual builds and advanced layouts, see the [Docker deploy guide](docker/deploy/README.md).
 
 ## Configuration
 

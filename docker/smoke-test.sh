@@ -25,42 +25,27 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p "$scratch/source"
-git -C "$repo" archive HEAD etc plugins sitebot docker/deploy | tar -x -C "$scratch/source"
-sh "$scratch/source/docker/deploy/init.sh" master
-# Rerunning initialization must preserve existing authentication data.
-printf '%s\n' '# CI: preserve existing authentication data' >> "$WEAVEFTPD_RUNTIME/etc/passwd"
-cp "$WEAVEFTPD_RUNTIME/etc/passwd" "$scratch/passwd.expected"
-sh "$scratch/source/docker/deploy/init.sh" master
-cmp "$scratch/passwd.expected" "$WEAVEFTPD_RUNTIME/etc/passwd"
+git -C "$repo" archive HEAD etc plugins sitebot docker | tar -x -C "$scratch/source"
+export WEAVEFTPD_SETUP_IMAGE="$image"
+export WEAVEFTPD_UID=$(id -u) WEAVEFTPD_GID=$(id -g)
+# Exercise the actual interactive wizard with a custom account and non-root
+# filesystem identity. No generated configs are replaced with test fixtures.
+printf '%s\n' master 127.0.0.1 "$WEAVEFTPD_SITE_PATH" UTC 21099 42130 42139 \
+  "$WEAVEFTPD_UID" "$WEAVEFTPD_GID" 22121 SmokeAdmin 127.0.0.1 \
+  'Smoke test password 42!' 'Smoke test password 42!' no yes no | \
+  bash "$scratch/source/docker/setup.sh"
+printf '%s\n' '# preserve custom settings on rerun' >> "$WEAVEFTPD_RUNTIME/etc/config.yml"
+find "$WEAVEFTPD_RUNTIME" -type f -exec sha256sum {} + | sort > "$scratch/before.sha"
+printf 'master\n' | bash "$scratch/source/docker/setup.sh"
+find "$WEAVEFTPD_RUNTIME" -type f -exec sha256sum {} + | sort > "$scratch/after.sha"
+cmp "$scratch/before.sha" "$scratch/after.sha"
+test ! -f "$WEAVEFTPD_RUNTIME/etc/users/weaveftpd"
 
 python3 - "$WEAVEFTPD_RUNTIME" "$scratch/override.json" "$project" <<'PY'
 import json, sys
 from pathlib import Path
 runtime, override, project = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
-common = dict(timezone='UTC', tls_enabled=True,
-              tls_cert='/app/etc/certs/server.crt', tls_key='/app/etc/certs/server.key',
-              log_console=True, debug=True, free_space_mb=0)
-master = dict(common, mode='master', storage_path='/app/site', acl_base_path='/',
-              rootpath='/', datapath='/app/userdata', passwd_file='/app/etc/passwd',
-              msg_path='/app/etc/msgs', listen_port=22121, public_ip='127.0.0.1',
-              pasv_min=42121, pasv_max=42129, passthrough=True,
-              require_tls_control=True, require_tls_data=True,
-              max_users=16, max_users_per_ip=16, max_connections=16,
-              sections=['SMOKE'], master=dict(listen_host='127.0.0.1', control_port=21099,
-              slave_masks_file='etc/slave_masks.txt', remerge_mode='off'))
-slave = dict(common, mode='slave', slave=dict(name='LOCAL', master_host='127.0.0.1',
-             master_port=21099, roots=['/app/site'], bind_ip='127.0.0.1',
-             pasv_port_min=42130, pasv_port_max=42139))
-# JSON is valid YAML; no Python YAML package is required on the runner.
-(runtime/'etc/config.yml').write_text(json.dumps(master))
-(runtime/'etc/config-slave-local.yml').write_text(json.dumps(slave))
-(runtime/'site/SMOKE/Container.Test-GRP').mkdir(parents=True, exist_ok=True)
-# The bundled siteop has flag 1 only. Give this isolated test fixture download
-# access (flag 3) and ratio 0 so payload verification does not depend on credits.
-userfile = runtime/'etc/users/weaveftpd'
-record = userfile.read_text()
-assert 'FLAGS 1\n' in record and 'RATIO 3\n' in record
-userfile.write_text(record.replace('FLAGS 1\n', 'FLAGS 13\n').replace('RATIO 3\n', 'RATIO 0\n'))
+(runtime/'site/TEST/Container.Test-GRP').mkdir(parents=True, exist_ok=True)
 override.write_text(json.dumps(dict(services={
     'master': dict(container_name=project+'-master'),
     'local-slave': dict(container_name=project+'-slave'),
@@ -81,7 +66,7 @@ python3 - "$WEAVEFTPD_RUNTIME" <<'PY'
 import ftplib, io, ssl, sys, time, zlib
 from pathlib import Path
 runtime = Path(sys.argv[1])
-context = ssl._create_unverified_context()  # Isolated loopback fixture certificate.
+context = ssl.create_default_context(cafile=str(runtime/'etc/certs/ca.crt'))
 class WeaveFTP(ftplib.FTP_TLS):
     def ntransfercmd(self, cmd, rest=None):
         # Route the data command to a slave before opening its passive socket.
@@ -94,9 +79,9 @@ while time.monotonic() < deadline:
     ftp = WeaveFTP(context=context, timeout=5)
     try:
         ftp.connect('127.0.0.1', 22121)
-        ftp.login('weaveftpd', 'weaveftpd')
+        ftp.login('SmokeAdmin', 'Smoke test password 42!')
         ftp.prot_p()
-        ftp.cwd('/SMOKE/Container.Test-GRP')
+        ftp.cwd('/TEST/Container.Test-GRP')
         ftp.nlst()  # Requires the storage slave to be connected and ready.
         break
     except (OSError, ftplib.Error) as exc:
@@ -113,11 +98,11 @@ ftp.storbinary('STOR container-smoke.bin', io.BytesIO(payload))
 received = io.BytesIO()
 ftp.retrbinary('RETR container-smoke.bin', received.write)
 assert received.getvalue() == payload, 'download differs from upload'
-assert (runtime/'site/SMOKE/Container.Test-GRP/container-smoke.bin').read_bytes() == payload
+assert (runtime/'site/TEST/Container.Test-GRP/container-smoke.bin').read_bytes() == payload
 assert 'container-smoke.bin' in ftp.nlst()
 ftp.delete('container-smoke.bin')
 ftp.delete('container-smoke.sfv')
 ftp.quit()
-assert not (runtime/'site/SMOKE/Container.Test-GRP/container-smoke.bin').exists(), 'delete did not reach the slave'
-print('PASS: shared image, default local slave, FTP TLS login/list/upload/download/delete')
+assert not (runtime/'site/TEST/Container.Test-GRP/container-smoke.bin').exists(), 'delete did not reach the slave'
+print('PASS: interactive installer, preserved settings, custom admin, non-root containers, mutual TLS, FTP TLS login/list/upload/download/delete')
 PY

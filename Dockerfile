@@ -10,11 +10,18 @@ RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 COPY plugins ./plugins
+COPY etc ./etc
+COPY sitebot/etc/templates ./sitebot/etc/templates
+COPY sitebot/plugins/announce/config.yml.dist ./sitebot/plugins/announce/config.yml.dist
 
 RUN CGO_ENABLED=1 GOOS=linux go build -trimpath \
     -tags "sqlite_omit_load_extension" \
     -ldflags '-s -w -extldflags "-static"' \
     -o /out/weaveftpd ./cmd/weaveftpd
+
+RUN CGO_ENABLED=0 go test ./cmd/docker-setup \
+    && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags '-s -w' \
+       -o /out/weaveftpd-setup ./cmd/docker-setup
 
 FROM golang:1.25-alpine AS sitebot-build
 WORKDIR /src/sitebot
@@ -32,10 +39,12 @@ FROM alpine:3.21 AS daemon
 RUN apk add --no-cache ca-certificates tzdata \
     && addgroup -S weaveftpd \
     && adduser -S -G weaveftpd weaveftpd
-LABEL org.opencontainers.image.source="https://github.com/WeaveFTPd/WeaveFTPd" \
+LABEL org.opencontainers.image.documentation="https://github.com/WeaveFTPd/WeaveFTPd/blob/main/docker/QUICKSTART.md" \
+      org.opencontainers.image.source="https://github.com/WeaveFTPd/WeaveFTPd" \
       org.opencontainers.image.description="WeaveFTPd master or slave daemon (selected by configuration)"
 WORKDIR /app
 COPY --from=daemon-build /out/weaveftpd /usr/local/bin/weaveftpd
+COPY --from=daemon-build /out/weaveftpd-setup /usr/local/bin/weaveftpd-setup
 
 # Config, users, site data and logs are bind-mounted at runtime.
 USER weaveftpd
@@ -46,7 +55,8 @@ FROM alpine:3.21 AS sitebot
 RUN apk add --no-cache ca-certificates tzdata \
     && addgroup -S weaveftpd \
     && adduser -S -G weaveftpd weaveftpd
-LABEL org.opencontainers.image.source="https://github.com/WeaveFTPd/WeaveFTPd" \
+LABEL org.opencontainers.image.documentation="https://github.com/WeaveFTPd/WeaveFTPd/blob/main/docker/QUICKSTART.md" \
+      org.opencontainers.image.source="https://github.com/WeaveFTPd/WeaveFTPd" \
       org.opencontainers.image.description="WeaveFTPd IRC sitebot"
 WORKDIR /app/sitebot
 COPY --from=sitebot-build /out/sitebot /usr/local/bin/sitebot

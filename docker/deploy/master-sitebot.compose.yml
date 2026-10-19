@@ -3,7 +3,7 @@
 # Runs the master daemon and sitebot on the same host. That is intentional:
 # the sitebot reads a local FIFO created in the shared etc volume.
 #
-# Master + local storage slave + sitebot start together:
+# Master + local storage slave start together (IRC: COMPOSE_PROFILES=sitebot):
 #   docker compose --env-file master.env -f master-sitebot.compose.yml up -d
 
 services:
@@ -27,6 +27,7 @@ services:
     command: ["--config", "/app/etc/config.yml"]
 
   sitebot:
+    profiles: [sitebot]
     image: ${WEAVEFTPD_SITEBOT_IMAGE:-ghcr.io/weaveftpd/weaveftpd-sitebot:latest}
     container_name: weaveftpd-sitebot
     network_mode: host

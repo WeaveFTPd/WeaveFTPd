@@ -48,10 +48,17 @@ jobs:
 
       - name: Image tags and labels
         id: meta
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ${{ steps.registry.outputs.namespace }}/${{ matrix.image }}
           flavor: latest=false
+          labels: |
+            org.opencontainers.image.documentation=https://github.com/WeaveFTPd/WeaveFTPd/blob/main/docker/QUICKSTART.md
+            org.opencontainers.image.description=WeaveFTPd ${{ matrix.target }}. Install: https://github.com/WeaveFTPd/WeaveFTPd/blob/main/docker/QUICKSTART.md
+          annotations: |
+            org.opencontainers.image.description=WeaveFTPd ${{ matrix.target }}. Interactive installer and quickstart: https://github.com/WeaveFTPd/WeaveFTPd/blob/main/docker/QUICKSTART.md
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=ref,event=branch
@@ -98,6 +105,7 @@ jobs:
           target: ${{ matrix.target }}
           platforms: linux/amd64
           push: true
+          annotations: ${{ steps.meta.outputs.annotations }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
