@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
@@ -137,6 +138,9 @@ func validate(v values) error {
 		}
 		if !safeName.MatchString(v["admin"]) || v["admin"] == "default" {
 			return errors.New("invalid administrator name")
+		}
+		if strings.IndexFunc(v["password"], unicode.IsSpace) >= 0 {
+			return errors.New("administrator password cannot contain whitespace: this daemon splits FTP command arguments on whitespace")
 		}
 		if len(v["password"]) < 12 || len(v["password"]) > 72 {
 			return errors.New("password must contain 12..72 bytes")
@@ -366,7 +370,7 @@ func slaveConfig(source string, v values, name, host string) (map[string]any, er
 	return m, nil
 }
 func masterFiles(source, stage string, v values) error {
-	for _, dir := range []string{"plugins", "userdata", "logs-local-slave", "etc/users", "etc/groups", "sitebot/etc", "sitebot/plugins", "sitebot/logs"} {
+	for _, dir := range []string{"plugins", "userdata", "backup", "logs-local-slave", "etc/users", "etc/groups", "sitebot/etc", "sitebot/plugins", "sitebot/logs"} {
 		if e := os.MkdirAll(filepath.Join(stage, dir), 0750); e != nil {
 			return e
 		}

@@ -65,7 +65,7 @@ if [[ $role == master ]]; then
   ask sections 'Sections (comma-separated, no spaces)' TEST
   ask admin 'New administrator username' admin
   ask admin_ip 'Trusted administrator source IP (as seen by this server)'
-  secret password 'New administrator password (12..72 bytes)'
+  secret password 'New administrator password (12..72 bytes, no spaces)'
   secret confirm 'Confirm password'
   [[ $password == "$confirm" ]] || { echo 'Passwords do not match.' >&2; exit 1; }
   unset confirm

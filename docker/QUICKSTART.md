@@ -23,7 +23,8 @@ Choose **master** for a complete server. The wizard asks for:
 - Section names (comma-separated; default `TEST`). These directories are created in storage.
 - Your own administrator username, password and trusted login source IP.
   Use the IP the server sees, usually your public IP. Passwords are entered
-  invisibly. There is **no preset FTP login** in this installer.
+  invisibly (12–72 bytes, no whitespace; the daemon splits FTP arguments on
+  whitespace). There is **no preset FTP login** in this installer.
 - Optional IRC server, bot nickname, channel, server password and FiSH key.
   IRC uses TLS with certificate verification. For a private IRC CA, configure
   `tls_verify: custom` and `tls_ca_cert` before enabling the bot.
@@ -117,6 +118,7 @@ All paths below are relative to `docker/deploy/`:
 | `runtime/master/etc/certs/` | TLS keys and certificates; protect and back up securely |
 | `runtime/master/ca/ca.key` | Private CA signing key; stays on the host, outside service container mounts |
 | `runtime/master/userdata/` | Persistent databases/state |
+| `runtime/master/backup/` | Automatic daemon backups of account state |
 | `runtime/master/sitebot/etc/config.yml` | IRC connection, channels and FiSH |
 | `runtime/master/sitebot/plugins/announce/config.yml` | Announce routing; speedtests go to `-chat` |
 | Selected storage path | Actual FTP files |

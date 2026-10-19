@@ -21,6 +21,7 @@ services:
       - ${WEAVEFTPD_RUNTIME:-./runtime/master}/etc:/app/etc
       - ${WEAVEFTPD_RUNTIME:-./runtime/master}/plugins:/app/plugins
       - ${WEAVEFTPD_RUNTIME:-./runtime/master}/userdata:/app/userdata
+      - ${WEAVEFTPD_RUNTIME:-./runtime/master}/backup:/app/backup
       - ${WEAVEFTPD_RUNTIME:-./runtime/master}/logs:/app/logs
       - ${WEAVEFTPD_SITE_PATH:-./runtime/master/site}:/app/site
       - ${WEAVEFTPD_RUNTIME:-./runtime/master}/sitebot:/app/sitebot:ro

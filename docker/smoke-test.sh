@@ -35,7 +35,7 @@ export WEAVEFTPD_UID=$(id -u) WEAVEFTPD_GID=$(id -g)
 # filesystem identity. No generated configs are replaced with test fixtures.
 printf '%s\n' master 127.0.0.1 "$WEAVEFTPD_SITE_PATH" UTC 21099 42130 42139 \
   "$WEAVEFTPD_UID" "$WEAVEFTPD_GID" 22121 TEST SmokeAdmin 127.0.0.1 \
-  'Smoke test password 42!' 'Smoke test password 42!' no yes no | \
+  'Smoke-test-password-42!' 'Smoke-test-password-42!' no yes no | \
   bash "$scratch/source/docker/setup.sh"
 printf '%s\n' '# preserve custom settings on rerun' >> "$WEAVEFTPD_RUNTIME/etc/config.yml"
 find "$WEAVEFTPD_RUNTIME" -type f -exec sha256sum {} + | sort > "$scratch/before.sha"
@@ -81,7 +81,7 @@ while time.monotonic() < deadline:
     ftp = WeaveFTP(context=context, timeout=5)
     try:
         ftp.connect('127.0.0.1', 22121)
-        ftp.login('SmokeAdmin', 'Smoke test password 42!')
+        ftp.login('SmokeAdmin', 'Smoke-test-password-42!')
         ftp.prot_p()
         ftp.cwd('/TEST')
         try:

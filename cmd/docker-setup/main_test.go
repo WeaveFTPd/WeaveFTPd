@@ -20,7 +20,7 @@ func fixture(t *testing.T) (string, string, values) {
 	}
 	out := t.TempDir()
 	site := filepath.Join(out, "storage with $dollar and 'quote")
-	return source, out, values{"role": "master", "public_ip": "127.0.0.1", "ftp_port": "22121", "control_port": "21099", "pasv_min": "42130", "pasv_max": "42139", "site_path": site, "admin": "TestAdmin", "password": "A different test password!", "admin_ip": "192.0.2.1", "timezone": "UTC", "uid": "0", "gid": "0", "image": "test:daemon", "sitebot_image": "test:sitebot", "irc_host": "irc.example.net", "irc_port": "6697", "irc_nick": "TestBot", "irc_channel": "#test", "irc_password": "server secret", "fish_key": "fish secret"}
+	return source, out, values{"role": "master", "public_ip": "127.0.0.1", "ftp_port": "22121", "control_port": "21099", "pasv_min": "42130", "pasv_max": "42139", "site_path": site, "admin": "TestAdmin", "password": "A-different-test-password!", "admin_ip": "192.0.2.1", "timezone": "UTC", "uid": "0", "gid": "0", "image": "test:daemon", "sitebot_image": "test:sitebot", "irc_host": "irc.example.net", "irc_port": "6697", "irc_nick": "TestBot", "irc_channel": "#test", "irc_password": "server secret", "fish_key": "fish secret"}
 }
 func input(v values) *bytes.Buffer {
 	b := new(bytes.Buffer)
@@ -102,7 +102,7 @@ func TestFreshAndPreserve(t *testing.T) {
 		}
 		return nil
 	})
-	v["password"] = "Should never replace this"
+	v["password"] = "Should-never-replace-this"
 	if e = setup(input(v), source, out); e == nil {
 		t.Fatal("existing runtime accepted")
 	}
@@ -113,7 +113,8 @@ func TestFreshAndPreserve(t *testing.T) {
 	}
 }
 func TestInvalidInputHasNoRuntime(t *testing.T) {
-	for name, edit := range map[string]func(values){"short password": func(v values) { v["password"] = "short" }, "path username": func(v values) { v["admin"] = "../oops" }, "open admin": func(v values) { v["admin_ip"] = "*" }, "overlap": func(v values) { v["ftp_port"] = v["pasv_min"] }, "reversed range": func(v values) { v["pasv_min"] = "65535" }, "newline": func(v values) { v["fish_key"] = "line\nsecret" }} {
+	for name, edit := range map[string]func(values){"short password": func(v values) { v["password"] = "short" },
+		"spaced password": func(v values) { v["password"] = "Not a usable password" }, "path username": func(v values) { v["admin"] = "../oops" }, "open admin": func(v values) { v["admin_ip"] = "*" }, "overlap": func(v values) { v["ftp_port"] = v["pasv_min"] }, "reversed range": func(v values) { v["pasv_min"] = "65535" }, "newline": func(v values) { v["fish_key"] = "line\nsecret" }} {
 		t.Run(name, func(t *testing.T) {
 			source, out, v := fixture(t)
 			edit(v)
