@@ -1,3 +1,8 @@
+> **New installation? Start with the [interactive Docker quickstart](../QUICKSTART.md).**
+> This page describes the older manual deploy flow. The wizard does not use
+> `init.sh` or its example FTP login. IRC now requires `COMPOSE_PROFILES=sitebot`
+> in `master.env` (the wizard sets this when enabled).
+
 # Docker deployment
 
 The standard installation runs a master, local storage slave, and IRC sitebot
