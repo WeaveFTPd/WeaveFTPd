@@ -76,10 +76,16 @@ import ftplib, io, ssl, sys, time
 from pathlib import Path
 runtime = Path(sys.argv[1])
 context = ssl._create_unverified_context()  # Isolated loopback fixture certificate.
+class WeaveFTP(ftplib.FTP_TLS):
+    def ntransfercmd(self, cmd, rest=None):
+        # Route the data command to a slave before opening its passive socket.
+        self.voidcmd('PRET ' + cmd)
+        return super().ntransfercmd(cmd, rest)
+
 deadline = time.monotonic() + 90
 last_error = None
 while time.monotonic() < deadline:
-    ftp = ftplib.FTP_TLS(context=context, timeout=5)
+    ftp = WeaveFTP(context=context, timeout=5)
     try:
         ftp.connect('127.0.0.1', 22121)
         ftp.login('weaveftpd', 'weaveftpd')
