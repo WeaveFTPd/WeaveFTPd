@@ -7,7 +7,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY cmd ./cmd
+COPY cmd/weaveftpd ./cmd/weaveftpd
 COPY internal ./internal
 COPY plugins ./plugins
 COPY etc ./etc
@@ -19,6 +19,7 @@ RUN CGO_ENABLED=1 GOOS=linux go build -trimpath \
     -ldflags '-s -w -extldflags "-static"' \
     -o /out/weaveftpd ./cmd/weaveftpd
 
+COPY cmd/docker-setup ./cmd/docker-setup
 RUN CGO_ENABLED=0 go test ./cmd/docker-setup \
     && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags '-s -w' \
        -o /out/weaveftpd-setup ./cmd/docker-setup

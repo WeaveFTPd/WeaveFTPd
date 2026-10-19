@@ -43,6 +43,12 @@ func TestFreshAndPreserve(t *testing.T) {
 		t.Fatal(e)
 	}
 	root := filepath.Join(out, "runtime/master")
+	if _, err := os.Stat(filepath.Join(root, "etc/certs/ca.key")); !os.IsNotExist(err) {
+		t.Fatal("CA signing key would be mounted into running services")
+	}
+	if len(mustRead(t, filepath.Join(root, "ca/ca.key"))) == 0 {
+		t.Fatal("missing host CA signing key")
+	}
 	passwd := mustRead(t, filepath.Join(root, "etc/passwd"))
 	parts := strings.Split(string(passwd), ":")
 	if parts[0] != "TestAdmin" || bcrypt.CompareHashAndPassword([]byte(parts[1]), []byte(v["password"])) != nil {

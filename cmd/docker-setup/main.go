@@ -223,6 +223,14 @@ func setup(r io.Reader, source, output string) error {
 		if e = createCA(certDir, v["public_ip"]); e != nil {
 			return e
 		}
+		// The signing key stays on the host, outside every service bind mount.
+		privateCA := filepath.Join(stage, "ca")
+		if e = os.Mkdir(privateCA, 0700); e != nil {
+			return e
+		}
+		if e = os.Rename(filepath.Join(certDir, "ca.key"), filepath.Join(privateCA, "ca.key")); e != nil {
+			return e
+		}
 	} else {
 		if e = remoteFiles(source, stage, v); e != nil {
 			return e
@@ -255,7 +263,7 @@ func setup(r io.Reader, source, output string) error {
 	if e = os.Rename(stage, target); e != nil {
 		return e
 	}
-	if e = writeNew(env, []byte(body), 0600); e != nil {
+	if e = writeNew(env, []byte(body), 0644); e != nil {
 		return e
 	}
 	fmt.Printf("Created %s runtime. Existing installations are never overwritten.\n", role)
@@ -579,7 +587,7 @@ func issueSlave(output, name, ip string) error {
 	if e != nil {
 		return e
 	}
-	kb, e := os.ReadFile(filepath.Join(dir, "ca.key"))
+	kb, e := os.ReadFile(filepath.Join(output, "runtime/master/ca/ca.key"))
 	if e != nil {
 		return e
 	}

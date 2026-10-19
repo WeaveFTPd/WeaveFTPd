@@ -7,11 +7,11 @@ image=${WEAVEFTPD_SETUP_IMAGE:-ghcr.io/weaveftpd/weaveftpd:latest}
 sitebot_image=${WEAVEFTPD_SETUP_SITEBOT_IMAGE:-ghcr.io/weaveftpd/weaveftpd-sitebot:latest}
 ask() {
   local answer
-  read -r -p "$2${3:+ [$3]}: " answer
+  IFS= read -r -p "$2${3:+ [$3]}: " answer
   printf -v "$1" '%s' "${answer:-${3:-}}"
 }
 secret() {
-  read -r -s -p "$2: " "$1"
+  IFS= read -r -s -p "$2: " "$1"
   printf '\n'
 }
 yes() { [[ "$1" == [yY] || "$1" == [yY][eE][sS] ]]; }
@@ -90,6 +90,8 @@ printf 'Image: %s\nTLS: required for FTP; mutual TLS on the slave control link.\
 ask proceed 'Create this NEW installation? (yes/no)' yes
 yes "$proceed" || exit 0
 pull_setup
+# Keep the runtime parent owned by the host operator, not the setup container.
+mkdir -p -- "$deploy/runtime"
 
 mounts=(--mount "type=bind,src=$repo,dst=/source,readonly" --mount "type=bind,src=$deploy,dst=/output")
 [[ $role != slave ]] || mounts+=(--mount "type=bind,src=$bundle,dst=/bundle,readonly")

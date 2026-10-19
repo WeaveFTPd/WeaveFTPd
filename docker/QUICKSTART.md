@@ -114,7 +114,8 @@ All paths below are relative to `docker/deploy/`:
 | `runtime/master/etc/config-slave-local.yml` | Local slave IP, passive ports, TLS and storage |
 | `runtime/master/etc/permissions.yml` | FTP access rules |
 | `runtime/master/etc/passwd`, `users/`, `group`, `groups/` | FTP accounts, password hashes, groups |
-| `runtime/master/etc/certs/` | Private CA, TLS keys and certificates; protect and back up securely |
+| `runtime/master/etc/certs/` | TLS keys and certificates; protect and back up securely |
+| `runtime/master/ca/ca.key` | Private CA signing key; stays on the host, outside service container mounts |
 | `runtime/master/userdata/` | Persistent databases/state |
 | `runtime/master/sitebot/etc/config.yml` | IRC connection, channels and FiSH |
 | `runtime/master/sitebot/plugins/announce/config.yml` | Announce routing; speedtests go to `-chat` |
