@@ -27,6 +27,11 @@ trap cleanup EXIT
 mkdir -p "$scratch/source"
 git -C "$repo" archive HEAD etc plugins sitebot docker/deploy | tar -x -C "$scratch/source"
 sh "$scratch/source/docker/deploy/init.sh" master
+# Rerunning initialization must preserve existing authentication data.
+printf '%s\n' '# CI: preserve existing authentication data' >> "$WEAVEFTPD_RUNTIME/etc/passwd"
+cp "$WEAVEFTPD_RUNTIME/etc/passwd" "$scratch/passwd.expected"
+sh "$scratch/source/docker/deploy/init.sh" master
+cmp "$scratch/passwd.expected" "$WEAVEFTPD_RUNTIME/etc/passwd"
 
 python3 - "$WEAVEFTPD_RUNTIME" "$scratch/override.json" "$project" <<'PY'
 import json, sys
