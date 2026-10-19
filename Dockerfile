@@ -32,6 +32,8 @@ FROM alpine:3.21 AS daemon
 RUN apk add --no-cache ca-certificates tzdata \
     && addgroup -S weaveftpd \
     && adduser -S -G weaveftpd weaveftpd
+LABEL org.opencontainers.image.source="https://github.com/WeaveFTPd/WeaveFTPd" \
+      org.opencontainers.image.description="WeaveFTPd master or slave daemon (selected by configuration)"
 WORKDIR /app
 COPY --from=daemon-build /out/weaveftpd /usr/local/bin/weaveftpd
 
@@ -44,6 +46,8 @@ FROM alpine:3.21 AS sitebot
 RUN apk add --no-cache ca-certificates tzdata \
     && addgroup -S weaveftpd \
     && adduser -S -G weaveftpd weaveftpd
+LABEL org.opencontainers.image.source="https://github.com/WeaveFTPd/WeaveFTPd" \
+      org.opencontainers.image.description="WeaveFTPd IRC sitebot"
 WORKDIR /app/sitebot
 COPY --from=sitebot-build /out/sitebot /usr/local/bin/sitebot
 

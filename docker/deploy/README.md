@@ -1,131 +1,148 @@
-# Docker Deploy Pack
+# Docker deployment
 
-This directory is the easy path for running WeaveFTPd with Docker on real Linux
-servers. Build the images locally on each machine, then run the deploy compose
-files from those local images.
+The standard installation runs a master, local storage slave, and IRC sitebot
+on a Linux amd64 Docker host. Master and slave are separate containers made
+from the **same** `ghcr.io/weaveftpd/weaveftpd` image; `mode` in each config
+selects the role. The slave is started by Compose together with the master.
 
-There are two normal layouts:
+## First installation
 
-- master machine: master daemon + sitebot, and optionally a local slave
-- slave machine: one remote slave daemon
-
-The sitebot should run on the master machine. It reads daemon events from a
-local FIFO. Separate containers are fine, but both containers must mount the
-same host directory for `/app/etc`.
-
-Remote slaves do not need the FIFO and do not need the sitebot.
-
-## Master Machine
-
-Initialize runtime files:
+From a checkout of this repository:
 
 ```bash
 cd docker/deploy
-./init.sh master
+sh init.sh master
 ```
 
-Edit:
+The initializer creates `runtime/master/`, config copies, a TLS certificate
+(requires `openssl` on the host), and the `LOCAL 127.0.0.1` slave mask. Review:
 
-```text
-runtime/master/etc/config.yml
-runtime/master/sitebot/etc/config.yml
-master.env
-```
+- `runtime/master/etc/config.yml`: public IP, FTP ports and master settings.
+- `runtime/master/etc/config-slave-local.yml`: slave public IP and passive ports.
+- `runtime/master/sitebot/etc/config.yml`: IRC server and announce channels.
+- `master.env`: image tags, host storage path and container UID/GID.
 
-Start master + sitebot:
+Change the bundled `weaveftpd` / `weaveftpd` example login before public use.
+
+Start all three services:
 
 ```bash
-docker build --target daemon -t weaveftpd:latest ../..
-docker build --target sitebot -t weaveftpd-sitebot:latest ../..
-docker compose --env-file master.env -f master-sitebot.compose.yml up -d master sitebot
-docker compose --env-file master.env -f master-sitebot.compose.yml logs -f master sitebot
+docker compose --env-file master.env -f master-sitebot.compose.yml up -d
+docker compose --env-file master.env -f master-sitebot.compose.yml logs -f
 ```
 
-If the same machine should also be a storage slave:
+To run just the master and local slave without IRC:
 
 ```bash
-docker compose --env-file master.env -f master-sitebot.compose.yml --profile local-slave up -d
-docker compose --env-file master.env -f master-sitebot.compose.yml logs -f master sitebot local-slave
+docker compose --env-file master.env -f master-sitebot.compose.yml up -d master local-slave
 ```
 
-The local slave config is:
+The slave connects to `127.0.0.1:1099`. Host networking preserves FTP passive
+ports, advertised addresses and FXP peer addresses. Set the public addresses
+in both daemon configs, and allow the configured FTP/passive ports through
+the host firewall (and NAT where applicable).
 
-```text
-runtime/master/etc/config-slave-local.yml
-```
+## Images and automatic publishing
 
-It connects to `127.0.0.1:1099` because all containers use host networking.
-`init.sh master` also creates an explicit `LOCAL 127.0.0.1` slave mask, so the
-local slave can authenticate without additional steps.
+| Image | Role |
+|-------|------|
+| `ghcr.io/weaveftpd/weaveftpd` | Master or slave daemon |
+| `ghcr.io/weaveftpd/weaveftpd-sitebot` | IRC sitebot |
 
-## Remote Slave Machine
+The Docker images workflow runs on pushes to `main` / `dev`, version tags
+starting with `v`, pull requests and manual dispatch. It builds both images,
+tests a master/slave TLS upload/download and checks the sitebot executable.
+Only successful builds on push or manual dispatch are published, using the
+repository's `GITHUB_TOKEN`; no Docker Hub password or extra PAT is needed.
 
-Initialize runtime files:
+| Tag | Source |
+|-----|--------|
+| `latest`, `main` | Latest successful `main` build |
+| `dev` | Latest successful `dev` build |
+| `v1.3.0`, `1.3.0`, `1.3` | Example `v1.3.0` release tag |
+| `sha-<full-commit>` | Specific source commit |
+
+Both daemon roles should use the same image version. Use the tags in
+`master.env` and `slave.env` to pin versions. For forks, the workflow publishes
+under the fork owner's lowercase GHCR namespace; change the image names in
+the env files accordingly. New GHCR packages initially follow GitHub's
+package visibility settings; make both packages public in their package
+settings for anonymous pulls, or authenticate with `docker login ghcr.io`.
+
+Existing env files are never overwritten by `init.sh`. Change local image
+names there to the GHCR names when adopting published images.
+
+## Remote slave host
+
+A remote slave uses the same daemon image, with only its slave config:
 
 ```bash
 cd docker/deploy
-MASTER_HOST="203.0.113.10" SLAVE_NAME="SLAVE1" ./init.sh slave
+MASTER_HOST="203.0.113.10" SLAVE_NAME="SLAVE1" sh init.sh slave
 ```
 
-Edit:
-
-```text
-runtime/slave/etc/config.yml
-slave.env
-```
-
-Before starting, register the remote slave's source address on the master:
+Edit `runtime/slave/etc/config.yml` and `slave.env`. Register its source
+address on the master before starting:
 
 ```text
 SITE SLAVE SLAVE1 ADDMASK 203.0.113.20/32
 ```
 
-For mTLS instead of IP masks, follow
-[Master-Slave Authentication](../../docs/Master-Slave-TLS.md), copy the CA and
-that slave's certificate/key into `runtime/slave/etc/certs`, and set the three
-certificate paths in the slave config. Once `master.slave_ca_cert` is enabled,
-every slave connecting to that master must present a valid client certificate.
-
-Start the slave:
-
 ```bash
-docker build --target daemon -t weaveftpd:latest ../..
-docker compose --env-file slave.env -f slave.compose.yml up -d slave
-docker compose --env-file slave.env -f slave.compose.yml logs -f slave
+docker compose --env-file slave.env -f slave.compose.yml up -d
+docker compose --env-file slave.env -f slave.compose.yml logs -f
 ```
 
-## FIFO And Sitebot
+For mTLS, follow [Master-Slave Authentication](../../docs/Master-Slave-TLS.md),
+install the CA and slave certificate/key in the slave's `etc/certs`, and set
+the three certificate paths. Enabling `master.slave_ca_cert` requires a valid
+client certificate from every slave.
 
-The master daemon writes JSON events to:
-
-```text
-/app/etc/weaveftpd.sitebot.fifo
-```
-
-The sitebot reads the same path. This works because both services mount:
-
-```text
-runtime/master/etc:/app/etc
-```
-
-Do not put the sitebot on a different machine unless you also add a network
-event transport. A POSIX FIFO is local filesystem IPC.
+A master host backed entirely by remote slaves can start `master sitebot`
+explicitly to omit the local slave. At least one storage slave is needed.
 
 ## Updating
 
-Rebuild the local image and restart:
+Wait until transfers are idle before recreating containers:
 
 ```bash
-docker build --target daemon -t weaveftpd:latest ../..
-docker build --target sitebot -t weaveftpd-sitebot:latest ../..
+docker compose --env-file master.env -f master-sitebot.compose.yml pull
 docker compose --env-file master.env -f master-sitebot.compose.yml up -d
 ```
 
-For a remote slave:
+On a remote slave:
 
 ```bash
-docker build --target daemon -t weaveftpd:latest ../..
+docker compose --env-file slave.env -f slave.compose.yml pull
 docker compose --env-file slave.env -f slave.compose.yml up -d
 ```
 
-Runtime data stays in `runtime/`; images only contain binaries.
+Publishing new images does not automatically restart running servers. Runtime
+data stays in the bind-mounted `runtime/` directories and configured site path.
+
+## Local builds
+
+From the repository root:
+
+```bash
+docker build --target daemon -t weaveftpd:local .
+docker build --target sitebot -t weaveftpd-sitebot:local .
+```
+
+Set the corresponding image names in `master.env` / `slave.env`, then use the
+same deploy commands. The root `docker-compose.yml` also supports local builds:
+`docker compose up -d --build` starts master and slave; add `--profile sitebot`
+before `up` for the bot. Configure root `etc/` paths and certificates first,
+or use the initialized deploy pack above.
+
+## FIFO and permissions
+
+The sitebot runs on the master host and reads `/app/etc/weaveftpd.sitebot.fifo`.
+Both containers mount the same host `etc` directory. A FIFO cannot connect
+containers on different machines.
+
+Compose defaults to UID/GID 0 for existing file ownership. To use another
+UID/GID, set `WEAVEFTPD_UID` / `WEAVEFTPD_GID` and make all runtime mounts
+writable by that identity. An individual image defaults to the unprivileged
+`weaveftpd` user. Keep real credentials, certificates and data in runtime
+mounts; the images contain binaries, CA certificates and timezone data.

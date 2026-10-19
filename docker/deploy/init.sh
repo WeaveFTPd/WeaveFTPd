@@ -29,6 +29,18 @@ copy_file_if_missing() {
   fi
 }
 
+seed_master_passwd() {
+  file="$1"
+  # Only seed a new runtime. Never replace existing accounts or passwords.
+  [ ! -e "$file" ] || return 0
+  mkdir -p "$(dirname "$file")"
+  # The repository's passwd hash may have changed independently of the example
+  # account. A fresh Docker runtime must match the documented bootstrap login.
+  sed 's#^weaveftpd:[^:]*:#weaveftpd:$2a$10$j1eCJxNq56qpLSP3FQNvlOCYeM9s9L9I71qhhh1i/xzazV4Z4G8UK:#' \
+    "$repo_root/etc/passwd" > "$file"
+  chmod 600 "$file"
+}
+
 copy_dir_if_missing() {
   copy_src="$1"
   copy_dst="$2"
@@ -141,7 +153,7 @@ init_master() {
   copy_file_if_missing "$repo_root/etc/config-slave-example.yml" "$dst/etc/config-slave-local.yml"
   copy_file_if_missing "$repo_root/etc/permissions.yml" "$dst/etc/permissions.yml"
   copy_file_if_missing "$repo_root/etc/affils.yml" "$dst/etc/affils.yml"
-  copy_file_if_missing "$repo_root/etc/passwd" "$dst/etc/passwd"
+  seed_master_passwd "$dst/etc/passwd"
   copy_file_if_missing "$repo_root/etc/group" "$dst/etc/group"
   copy_file_if_missing "$repo_root/etc/version" "$dst/etc/version"
   copy_dir_if_missing "$repo_root/etc/users" "$dst/etc/users"
