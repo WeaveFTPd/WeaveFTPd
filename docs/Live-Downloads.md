@@ -10,8 +10,11 @@ deny live downloads with a `denydownload` permission rule; WeaveFTPd uses the
 existing global `dl_incomplete` setting.
 
 The slave waits when a downloader reaches the current end of a live upload,
-then sends newly written bytes. A follower with no source progress fails after
-20 seconds (30 seconds for the local-file backend). The downloader must wait
+then sends newly written bytes. As in DrFTPD, it waits for the source upload
+to finish rather than applying a shorter independent download idle timeout.
+The receiving upload still aborts after 30 seconds without input; that failure
+also terminates its followers. The local-file backend has a 30-second follow
+limit. The downloader must wait
 for the source upload to finish and pass synchronous upload verification before
 receiving a final 226. An upload error, abort, deleted source or failed SFV
 verification fails the follower too. Bytes already transmitted cannot be

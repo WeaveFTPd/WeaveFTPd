@@ -60,13 +60,6 @@ const (
 	TransferSending    = 'S' // download from slave to client
 	transferPollTick   = 100 * time.Millisecond
 	transferStatusTick = time.Second
-	// leechFollowIdleLimit bounds how long a download may "follow" a still-running
-	// upload of the same file (leech-while-upload) without receiving any new bytes.
-	// A live upload that has stalled but not finished would otherwise spin here
-	// forever, so the racing client (cbftp) hangs until its own timeout and leaves
-	// the file missing. Giving up cleanly lets it retry, which succeeds once the
-	// upload has completed.
-	leechFollowIdleLimit = 20 * time.Second
 	// dataWriteTimeout bounds a single chunk write so a receiver that stops reading
 	// surfaces as an error instead of blocking the send indefinitely.
 	dataWriteTimeout = 60 * time.Second
@@ -495,7 +488,6 @@ func (t *Transfer) SendFile(path string, position int64, expectedPeer string) pr
 	}
 
 	lastStatus := time.Now()
-	lastProgress := time.Now()
 	associatedUpload := t.findAssociatedUpload(path)
 
 	// The zero-copy sendfile(2) fast path is valid for plaintext downloads. TLS
@@ -540,9 +532,6 @@ func (t *Transfer) SendFile(path string, position int64, expectedPeer string) pr
 				t.transferred.Add(n)
 			}
 		}
-		if n > 0 {
-			lastProgress = time.Now()
-		}
 
 		if time.Since(lastStatus) >= transferStatusTick {
 			t.slave.writeStatusObject(&protocol.AsyncResponseTransferStatus{Status: t.currentStatus(false, "")})
@@ -566,12 +555,10 @@ func (t *Transfer) SendFile(path string, position int64, expectedPeer string) pr
 					}
 				}
 				if !finished {
-					// Following a growing source file. If it has produced no new bytes
-					// for too long the upload is stalled; give up so the client fails
-					// fast and retries instead of hanging until its own timeout.
-					if time.Since(lastProgress) >= leechFollowIdleLimit {
-						return t.errorStatus("source upload stalled while following (leech idle timeout)")
-					}
+					// Like DrFTPD, temporary EOF follows the source until that
+					// upload completes. ReceiveFile owns the source idle timeout
+					// and publishes its error/abort; a shorter follower timeout
+					// incorrectly fails valid uploads waiting for their final EOF.
 					associatedUpload = live
 					time.Sleep(transferPollTick)
 					continue

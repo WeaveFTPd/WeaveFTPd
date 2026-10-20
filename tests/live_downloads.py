@@ -20,7 +20,7 @@ password=secrets.token_urlsafe(22)
 salt=secrets.token_bytes(4);pw_hash='$'+salt.hex()+'$'+hashlib.pbkdf2_hmac('sha1',password.encode(),salt,100,20).hex()
 (base/'etc/passwd').write_text(f'tester:{pw_hash}:1000:1000::/:/bin/false\n')
 (base/'etc/group').write_text('Test:1000:tester\n')
-(base/'etc/users/tester').write_text('USER Added by test\nGENERAL 0,120 -1 0 0\nFLAGS 13\nDIR /\nHOMEDIR /\nCREDITS 5000000\nRATIO 3\nLOGINSLOTS 30\nMAXSIM 0\nUPLOADSLOTS 10\nDOWNLOADSLOTS 10\nPRIMARY_GROUP Test\nGROUP Test 0\nIP *@127.0.0.1\n')
+(base/'etc/users/tester').write_text('USER Added by test\nGENERAL 0,120 -1 0 0\nFLAGS 13\nDIR /\nHOMEDIR /\nCREDITS 5000000\nRATIO 3\nLOGINSLOTS 30\nMAXSIM 0\nUPLOADSLOTS 10\nDOWNLOADSLOTS 3\nPRIMARY_GROUP Test\nGROUP Test 0\nIP *@127.0.0.1\n')
 (base/'etc/permissions.yml').write_text('[]\n')
 (base/'etc/slave_masks.txt').write_text('LOCAL 127.0.0.1\n')
 common=dict(timezone='UTC',tls_enabled=True,tls_cert=str(base/'etc/certs/server.crt'),tls_key=str(base/'etc/certs/server.key'),debug=True,log_console=True,free_space_mb=0)
@@ -168,6 +168,54 @@ def resume_upload_case(passthrough,abort=False):
         else:assert offset<=len(preserved)<=131072
     else:assert r.get('reply','').startswith('226') and r.get('data')==payload,'resumed source truncated'
     d.close();u.close();reports.append(dict(case='resumed-upload-'+str(passthrough)+'-'+str(abort),abort=abort,ok=True))
+def delayed_source_eof_case(passthrough):
+    u=connect();directory='/LIVE/Delayed.Source.EOF.'+str(passthrough);u.mkd(directory)
+    path=directory+'/release.sfv';payload=b'file.r00 12345678\n'*63
+    c=u.transfercmd('STOR '+path);c.sendall(payload)
+    end=time.monotonic()+5
+    while not (base/'site'/path.lstrip('/')).exists() or (base/'site'/path.lstrip('/')).stat().st_size!=len(payload):
+        if time.monotonic()>end:raise AssertionError('metadata not on disk')
+        time.sleep(.01)
+    readers=[]
+    for _ in range(3):
+        d=connect();d.sock.settimeout(45);data=d.transfercmd('RETR '+path);data.settimeout(45)
+        initial=recv_exact(data,len(payload));assert initial==payload
+        result={};t=threading.Thread(target=read_rest,args=(d,data,initial,result));t.start()
+        readers.append((d,t,result))
+    fourth=connect()
+    try:fourth.transfercmd('RETR '+path)
+    except ftplib.error_perm as e:assert 'Maximum simultaneous downloads reached (3)' in str(e),str(e)
+    else:raise AssertionError('fourth reader bypassed the existing three-slot policy')
+    fourth.close()
+    # This reproduces the production case: all bytes have arrived, but the
+    # upstream server does not close its data connection until after 20s.
+    time.sleep(21.5)
+    try:
+        assert all(t.is_alive() for _,t,_ in readers),'follower incorrectly timed out before source EOF'
+    finally:
+        c.unwrap().close()
+    u.voidresp()
+    for d,t,result in readers:
+        t.join(10);assert not t.is_alive(),'follower not released after source EOF'
+        assert result.get('reply','').startswith('226') and result.get('data')==payload,result.get('error','wrong data')
+        d.close()
+    retry=connect();received=io.BytesIO();retry.retrbinary('RETR '+path,received.write)
+    assert received.getvalue()==payload,'slots remained occupied after completion'
+    retry.quit()
+    # Reacquire all three slots together, rather than only proving one is free.
+    next_path=directory+'/next.nfo';source=u.transfercmd('STOR '+next_path);source.sendall(b'next')
+    slots=[]
+    for _ in range(3):
+        d=connect();data=d.transfercmd('RETR '+next_path);initial=recv_exact(data,4)
+        result={};t=threading.Thread(target=read_rest,args=(d,data,initial,result));t.start()
+        slots.append((d,t,result))
+    source.unwrap().close();u.voidresp()
+    for d,t,result in slots:
+        t.join(10);assert not t.is_alive() and result.get('reply','').startswith('226') and result.get('data')==b'next',result
+        d.close()
+    u.quit()
+    reports.append(dict(case='delayed-source-eof-'+str(passthrough),live_readers=3,waited_beyond_old_20s_limit=True,three_slot_limit_preserved=True,slots_released=True))
+
 try:
     for passthrough in [True,False]:
         launch(passthrough)
@@ -177,6 +225,8 @@ try:
         for abort in [False,True]:
             resume_upload_case(passthrough,abort)
             print(json.dumps(reports[-1]),flush=True)
+        delayed_source_eof_case(passthrough)
+        print(json.dumps(reports[-1]),flush=True)
         stop()
     (stage/'integration-result.json').write_text(json.dumps(dict(ok=True,cases=reports,network='isolated namespace',control_mtls=True,binary_sha256=hashlib.sha256((stage/'weaveftpd.candidate').read_bytes()).hexdigest()),indent=2))
     print('INTEGRATION PASS',flush=True)
