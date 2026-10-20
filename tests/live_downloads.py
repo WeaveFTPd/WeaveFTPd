@@ -17,7 +17,8 @@ if not (base/'etc/certs/server.crt').exists():
         (base/f'etc/certs/{name}.ext').write_text(ext)
         openssl('x509','-req','-in',f'etc/certs/{name}.csr','-CA','etc/certs/ca.crt','-CAkey','etc/certs/ca.key','-CAcreateserial','-days','2','-out',f'etc/certs/{name}.crt','-extfile',f'etc/certs/{name}.ext')
 password=secrets.token_urlsafe(22)
-salt=secrets.token_bytes(4);pw_hash='$'+salt.hex()+'$'+hashlib.pbkdf2_hmac('sha1',password.encode(),salt,100,20).hex()
+# Keep the legacy fixture hash distinct from the bcrypt $2 prefix.
+salt=bytes([0x9a])+secrets.token_bytes(3);pw_hash='$'+salt.hex()+'$'+hashlib.pbkdf2_hmac('sha1',password.encode(),salt,100,20).hex()
 (base/'etc/passwd').write_text(f'tester:{pw_hash}:1000:1000::/:/bin/false\n')
 (base/'etc/group').write_text('Test:1000:tester\n')
 (base/'etc/users/tester').write_text('USER Added by test\nGENERAL 0,120 -1 0 0\nFLAGS 13\nDIR /\nHOMEDIR /\nCREDITS 5000000\nRATIO 3\nLOGINSLOTS 30\nMAXSIM 0\nUPLOADSLOTS 10\nDOWNLOADSLOTS 3\nPRIMARY_GROUP Test\nGROUP Test 0\nIP *@127.0.0.1\n')
@@ -216,18 +217,19 @@ def delayed_source_eof_case(passthrough):
     u.quit()
     reports.append(dict(case='delayed-source-eof-'+str(passthrough),live_readers=3,waited_beyond_old_20s_limit=True,three_slot_limit_preserved=True,slots_released=True))
 
-try:
-    for passthrough in [True,False]:
-        launch(passthrough)
-        for protected,active,kind in [(True,False,'ok'),(True,True,'ok'),(False,False,'ok'),(False,True,'ok'),(True,False,'abort'),(False,True,'abort'),(True,False,'crc'),(True,False,'disabled')]:
-            stream_case(passthrough,protected,active,kind)
+if __name__ == "__main__":
+    try:
+        for passthrough in [True,False]:
+            launch(passthrough)
+            for protected,active,kind in [(True,False,'ok'),(True,True,'ok'),(False,False,'ok'),(False,True,'ok'),(True,False,'abort'),(False,True,'abort'),(True,False,'crc'),(True,False,'disabled')]:
+                stream_case(passthrough,protected,active,kind)
+                print(json.dumps(reports[-1]),flush=True)
+            for abort in [False,True]:
+                resume_upload_case(passthrough,abort)
+                print(json.dumps(reports[-1]),flush=True)
+            delayed_source_eof_case(passthrough)
             print(json.dumps(reports[-1]),flush=True)
-        for abort in [False,True]:
-            resume_upload_case(passthrough,abort)
-            print(json.dumps(reports[-1]),flush=True)
-        delayed_source_eof_case(passthrough)
-        print(json.dumps(reports[-1]),flush=True)
-        stop()
-    (stage/'integration-result.json').write_text(json.dumps(dict(ok=True,cases=reports,network='isolated namespace',control_mtls=True,binary_sha256=hashlib.sha256((stage/'weaveftpd.candidate').read_bytes()).hexdigest()),indent=2))
-    print('INTEGRATION PASS',flush=True)
-finally:stop()
+            stop()
+        (stage/'integration-result.json').write_text(json.dumps(dict(ok=True,cases=reports,network='isolated namespace',control_mtls=True,binary_sha256=hashlib.sha256((stage/'weaveftpd.candidate').read_bytes()).hexdigest()),indent=2))
+        print('INTEGRATION PASS',flush=True)
+    finally:stop()

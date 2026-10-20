@@ -278,6 +278,23 @@ func configureDataSocket(conn net.Conn) {
 	netutil.ConfigureDataSocket(conn, netutil.DefaultDataSocketBufferSize)
 }
 
+// upgradeFileDataTLS applies the persistent SSCN role to passive STOR/RETR too.
+// CPSV still selects client mode for one connection; LIST/NLST/MLSD keep their
+// existing TLS behavior because their peer is the controlling FTP client.
+func (s *Session) upgradeFileDataTLS(conn net.Conn, tlsConfig *tls.Config) (net.Conn, error) {
+	if s.DataTLS && s.SSCN && !s.lastDataConnActive {
+		s.nextDataTLSClientMode = true
+	}
+	return s.upgradeDataTLS(conn, tlsConfig)
+}
+
+func finishFileDataSend(conn net.Conn, tlsClientMode bool) error {
+	if tracked, ok := conn.(*bandwidthTrackingConn); ok {
+		conn = tracked.Conn
+	}
+	return netutil.FinishDataSend(conn, tlsClientMode)
+}
+
 // upgradeDataTLS applies encryption to the data connection if PROT P is enabled.
 func (s *Session) upgradeDataTLS(conn net.Conn, tlsConfig *tls.Config) (net.Conn, error) {
 	if !s.DataTLS {

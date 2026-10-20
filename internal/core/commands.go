@@ -937,9 +937,9 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 					var slaveName string
 					var err error
 					if s.PretCmd == "RETR" {
-						slaveIP, port, xferIdx, slaveName, err = bridge.SlaveListenForDownloadPassthrough(targetPath, s.DataTLS, false)
+						slaveIP, port, xferIdx, slaveName, err = bridge.SlaveListenForDownloadPassthrough(targetPath, s.DataTLS, s.SSCN)
 					} else {
-						slaveIP, port, xferIdx, slaveName, err = bridge.SlaveListenForPassthrough(targetPath, s.DataTLS, false)
+						slaveIP, port, xferIdx, slaveName, err = bridge.SlaveListenForPassthrough(targetPath, s.DataTLS, s.SSCN)
 					}
 					if err != nil {
 						log.Printf("[PASV] Passthrough slave listen failed: %v", err)
@@ -1769,7 +1769,7 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 					}
 				} else {
 					fmt.Fprintf(s.Conn, "150 Opening %s mode data connection.\r\n", transferTypeReplyName(s.TransferType))
-					dataConn, err := s.upgradeDataTLS(raw, tlsConfig)
+					dataConn, err := s.upgradeFileDataTLS(raw, tlsConfig)
 					if err != nil {
 						raw.Close()
 						return false
@@ -1872,7 +1872,7 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 		}
 
 		fmt.Fprintf(s.Conn, "150 Opening %s mode data connection.\r\n", transferTypeReplyName(s.TransferType))
-		dataConn, err := s.upgradeDataTLS(raw, tlsConfig)
+		dataConn, err := s.upgradeFileDataTLS(raw, tlsConfig)
 		if err != nil {
 			raw.Close()
 			return false
@@ -2172,7 +2172,8 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 						return false
 					}
 					fmt.Fprintf(s.Conn, "150 Opening %s mode data connection for %s (%d bytes).\r\n", transferTypeReplyName(s.TransferType), args[0], fileSize)
-					dataConn, err := s.upgradeDataTLS(raw, tlsConfig)
+					tlsClientMode := s.SSCN || s.nextDataTLSClientMode
+					dataConn, err := s.upgradeFileDataTLS(raw, tlsConfig)
 					if err != nil {
 						raw.Close()
 						return false
@@ -2183,7 +2184,11 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 					start := time.Now()
 					transferChecksum, err := bridge.DownloadFile(filePath, dataConn, s.User.Name, s.User.PrimaryGroup, restOffset, s.currentTransferTypeByte())
 					xferMs := time.Since(start).Milliseconds()
-					dataConn.Close()
+					if err == nil {
+						err = finishFileDataSend(dataConn, tlsClientMode)
+					} else {
+						dataConn.Close()
+					}
 					s.PretCmd = ""
 					s.PretArg = ""
 					if err != nil {
@@ -2274,7 +2279,8 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 			return false
 		}
 		fmt.Fprintf(s.Conn, "150 Opening %s mode data connection for %s (%d bytes).\r\n", transferTypeReplyName(s.TransferType), args[0], fileSize)
-		dataConn, err := s.upgradeDataTLS(raw, tlsConfig)
+		tlsClientMode := s.SSCN || s.nextDataTLSClientMode
+		dataConn, err := s.upgradeFileDataTLS(raw, tlsConfig)
 		if err != nil {
 			raw.Close()
 			return false
@@ -2306,7 +2312,11 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 		}
 		written, err := copyTransferData(dataConn, reader)
 		xferMs := time.Since(start).Milliseconds()
-		dataConn.Close()
+		if err == nil {
+			err = finishFileDataSend(dataConn, tlsClientMode)
+		} else {
+			dataConn.Close()
+		}
 		if err != nil {
 			writeTransferFailure(s.Conn, "Download", err)
 			return false
