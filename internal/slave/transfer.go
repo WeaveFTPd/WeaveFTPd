@@ -580,6 +580,10 @@ func (t *Transfer) SendFile(path string, position int64, expectedPeer string) pr
 		}
 	}
 
+	if err := netutil.FinishDataSend(conn, t.sslClientMode); err != nil {
+		return t.errorStatus(fmt.Sprintf("data shutdown failed: %v", err))
+	}
+
 	transferred := t.transferred.Load()
 	log.Printf("[Transfer] Sent %s (%d bytes, offset=%d)", path, transferred, position)
 	t.mu.Lock()
