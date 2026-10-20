@@ -230,6 +230,9 @@ func LoadConfig(filePath string) (*Config, error) {
 	}
 	raw := map[string]interface{}{}
 	_ = yaml.Unmarshal(data, &raw)
+	if _, ok := raw["dl_incomplete"]; !ok {
+		cfg.DLIncomplete = true
+	}
 	if _, ok := raw["show_cwd_banner"]; !ok {
 		cfg.ShowCWDBanner = true
 	}
@@ -558,6 +561,7 @@ func (c *Config) Rehash() (string, error) {
 	// Release management
 	c.NukeMaxMultiplier = fresh.NukeMaxMultiplier
 	c.NukeDirStyle = fresh.NukeDirStyle
+	c.DLIncomplete = fresh.DLIncomplete
 	c.Zipscript = fresh.Zipscript
 	c.Zipscript.ApplyDefaults()
 

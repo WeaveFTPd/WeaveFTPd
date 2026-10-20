@@ -36,7 +36,7 @@ type Bridge struct {
 	liveTransferStatsMu    sync.Mutex
 	listingDiagnosticAt    map[string]time.Time
 
-	pendingUploads sync.Map          // clean virtual path -> pendingUpload, visible to FTP listings only
+	pendingUploads sync.Map          // in-flight files for FTP routing/listings; never completed VFS records
 	uploadRecords  chan uploadRecord // async race-DB upload writes, off the 226 path
 }
 
@@ -73,7 +73,8 @@ const (
 	readFileCacheTTL          = 2 * time.Second
 	liveTransferStatsCacheTTL = 1 * time.Second
 	bridgeTransferBufferSize  = 4 * 1024 * 1024
-	pendingUploadTTL          = 10 * time.Minute
+	// Keep live files routable for the full two-hour transfer wait, plus cleanup grace.
+	pendingUploadTTL = 2*time.Hour + time.Minute
 )
 
 var bridgeTransferBufferPool = sync.Pool{
@@ -480,7 +481,7 @@ func (b *Bridge) ListDir(dirPath string) []core.MasterFileEntry {
 }
 
 func (b *Bridge) notePendingUpload(filePath, slaveName, owner, group string, position int64) {
-	if b == nil || position > 0 || !isPendingUploadListVisible(filePath) {
+	if b == nil || position > 0 {
 		return
 	}
 	cleanPath := cleanBridgePath(filePath)
@@ -560,11 +561,6 @@ func pendingUploadEntry(pu pendingUpload) core.MasterFileEntry {
 		Group:   group,
 		Slave:   pu.slaveName,
 	}
-}
-
-func isPendingUploadListVisible(filePath string) bool {
-	name := strings.ToLower(strings.TrimSpace(path.Base(filePath)))
-	return strings.HasSuffix(name, ".sfv")
 }
 
 func cleanBridgePath(filePath string) string {
