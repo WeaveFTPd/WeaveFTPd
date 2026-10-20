@@ -96,15 +96,16 @@ type Transfer struct {
 	activeAddress string
 	mode          byte
 
-	path        string
-	direction   byte
-	started     time.Time
-	finished    time.Time
-	transferred atomic.Int64
-	checksum    uint32
-	abortReason string
-	claimed     atomic.Bool // set once ReceiveFile/SendFile takes ownership
-	mu          sync.Mutex
+	path          string
+	direction     byte
+	started       time.Time
+	finished      time.Time
+	transferred   atomic.Int64
+	checksum      uint32
+	abortReason   string
+	terminalError string
+	claimed       atomic.Bool // set once ReceiveFile/SendFile takes ownership
+	mu            sync.Mutex
 }
 
 func NewTransfer(listener net.Listener, conn net.Conn, idx int32, slave *Slave, encrypted bool, sslClientMode bool) *Transfer {
@@ -552,10 +553,19 @@ func (t *Transfer) SendFile(path string, position int64, expectedPeer string) pr
 				// Find a live upload of this same file to follow (leech-while-upload).
 				// It may have registered after this send started, so re-check here.
 				live := associatedUpload
-				if live == nil || live.isFinished() {
+				if live == nil {
 					live = t.findAssociatedUpload(path)
+					associatedUpload = live
 				}
-				if live != nil && !live.isFinished() {
+				finished := true
+				if live != nil {
+					var failure string
+					finished, failure = live.uploadOutcome()
+					if failure != "" {
+						return t.errorStatus("source upload failed: " + failure)
+					}
+				}
+				if !finished {
 					// Following a growing source file. If it has produced no new bytes
 					// for too long the upload is stalled; give up so the client fails
 					// fast and retries instead of hanging until its own timeout.
@@ -565,6 +575,17 @@ func (t *Transfer) SendFile(path string, position int64, expectedPeer string) pr
 					associatedUpload = live
 					time.Sleep(transferPollTick)
 					continue
+				}
+				// The upload may have appended its final bytes after our EOF read
+				// but before publishing completion. Drain them before finishing.
+				if live != nil {
+					info, statErr := file.Stat()
+					if statErr != nil {
+						return t.errorStatus(fmt.Sprintf("source stat failed: %v", statErr))
+					}
+					if info.Size() > position+t.transferred.Load() {
+						continue
+					}
 				}
 				break
 			}
@@ -753,7 +774,19 @@ func (t *Transfer) Abort(reason string) {
 }
 
 func (t *Transfer) errorStatus(msg string) protocol.TransferStatus {
+	t.mu.Lock()
+	t.terminalError = msg
+	t.mu.Unlock()
 	return t.currentStatus(true, msg)
+}
+
+func (t *Transfer) uploadOutcome() (finished bool, failure string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.abortReason != "" {
+		return true, "aborted: " + t.abortReason
+	}
+	return !t.finished.IsZero(), t.terminalError
 }
 
 func (t *Transfer) isFinished() bool {

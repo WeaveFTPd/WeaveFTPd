@@ -753,3 +753,7 @@ log_delete_after_days: 1
 log_keep_days:  1
 log_console:    true
 
+
+# Allow RETR to follow a growing upload (default: true). False rejects live RETR.
+# Upload failure/abort and checksum verification still fail the following download.
+dl_incomplete: true
