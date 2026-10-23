@@ -163,12 +163,10 @@ func HandleSession(conn net.Conn, tlsConfig *tls.Config, cfg *Config, aclEngine 
 			}
 		}
 
-		parts := strings.Fields(line)
-		if len(parts) == 0 {
+		cmd, args := parseFTPCommand(line)
+		if cmd == "" {
 			continue
 		}
-		cmd := strings.ToUpper(parts[0])
-		args := parts[1:]
 
 		if session.Config.Debug {
 			log.Printf("[CMD] raw=%q cmd=%q args=%q", sanitizeLoggedFTPLine(line), cmd, args)
