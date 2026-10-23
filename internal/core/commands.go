@@ -2301,7 +2301,7 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 			return false
 		}
 
-		target := s.resolveListTargetPath("LIST", args, s.masterBridgeOrNil())
+		target := s.resolveListTargetPath("STAT", args, s.masterBridgeOrNil())
 		if err := s.validateListDirectoryTarget(target, s.masterBridgeOrNil()); err != nil {
 			if err.Error() == "504" {
 				fmt.Fprintf(s.Conn, "504 Command not implemented for that parameter.\r\n")

@@ -10,7 +10,7 @@ import (
 
 func listRequestTargetArg(cmd string, args []string) string {
 	switch strings.ToUpper(strings.TrimSpace(cmd)) {
-	case "LIST", "NLST":
+	case "LIST", "NLST", "STAT":
 		for _, arg := range args {
 			token := strings.TrimSpace(arg)
 			if token == "" || strings.HasPrefix(token, "-") {
@@ -39,7 +39,9 @@ func resolveSessionPath(currentDir, target string) string {
 
 func (s *Session) resolveListTargetPath(cmd string, args []string, bridge MasterBridge) string {
 	targetArg := listRequestTargetArg(cmd, args)
-	if targetArg == "" {
+	// STAT is a self-contained control-channel request, not the data transfer
+	// prepared by PRET. A pooled connection may still hold another release's PRET.
+	if targetArg == "" && !strings.EqualFold(strings.TrimSpace(cmd), "STAT") {
 		switch strings.ToUpper(strings.TrimSpace(s.PretCmd)) {
 		case "LIST", "NLST", "MLSD":
 			targetArg = strings.TrimSpace(s.PretArg)
