@@ -382,7 +382,14 @@ func main() {
 	server.IPAddresses = []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")}
 	client := leaf(3, slaveName, x509.ExtKeyUsageClientAuth)
 
-	writeCert(filepath.Join(dir, "ca.crt"), mustCert(ca, ca, &caKey.PublicKey, caKey))
+	caDER := mustCert(ca, ca, &caKey.PublicKey, caKey)
+	writeCert(filepath.Join(dir, "ca.crt"), caDER)
+	// Reuse the issued CA, including its generated SubjectKeyId, for leaf signing.
+	var err error
+	ca, err = x509.ParseCertificate(caDER)
+	if err != nil {
+		log.Fatal(err)
+	}
 	writeKey(filepath.Join(dir, "ca.key"), caKey)
 	writeCert(filepath.Join(dir, "server.crt"), mustCert(server, ca, &serverKey.PublicKey, caKey))
 	writeKey(filepath.Join(dir, "server.key"), serverKey)

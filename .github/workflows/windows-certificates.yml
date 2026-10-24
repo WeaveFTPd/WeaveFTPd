@@ -1,0 +1,28 @@
+name: Windows certificates
+
+on:
+  push:
+    branches: [windows]
+    paths: ['setup.ps1', 'tests/setup-certificates.ps1', '.github/workflows/windows-certificates.yml']
+  pull_request:
+    branches: [windows]
+    paths: ['setup.ps1', 'tests/setup-certificates.ps1', '.github/workflows/windows-certificates.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certificates:
+    name: Validate Windows certificates
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Test the actual installer certificate helper
+        shell: pwsh
+        run: |
+          go version
+          & ./tests/setup-certificates.ps1 -SetupScript ./setup.ps1 -OutputDirectory (Join-Path $env:RUNNER_TEMP 'weaveftpd-certificate-test')
