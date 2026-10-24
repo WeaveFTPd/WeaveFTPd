@@ -561,10 +561,10 @@ func newCert(cn string, ca bool) *x509.Certificate {
 	n, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	return &x509.Certificate{SerialNumber: n, Subject: pkix.Name{CommonName: cn}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().AddDate(5, 0, 0), BasicConstraintsValid: true, IsCA: ca, KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment}
 }
-func signCert(dir, stem string, c, parent *x509.Certificate, parentKey *rsa.PrivateKey) (*rsa.PrivateKey, error) {
+func signCert(dir, stem string, c, parent *x509.Certificate, parentKey *rsa.PrivateKey) (*rsa.PrivateKey, *x509.Certificate, error) {
 	k, e := rsa.GenerateKey(rand.Reader, 3072)
 	if e != nil {
-		return nil, e
+		return nil, nil, e
 	}
 	if parent == nil {
 		parent = c
@@ -572,18 +572,24 @@ func signCert(dir, stem string, c, parent *x509.Certificate, parentKey *rsa.Priv
 	}
 	b, e := x509.CreateCertificate(rand.Reader, c, parent, &k.PublicKey, parentKey)
 	if e != nil {
-		return nil, e
+		return nil, nil, e
+	}
+	// Use the issued certificate as an issuer, including the SubjectKeyId Go
+	// generates for a CA. The input template does not receive that identifier.
+	issued, e := x509.ParseCertificate(b)
+	if e != nil {
+		return nil, nil, e
 	}
 	if e = writeNew(filepath.Join(dir, stem+".crt"), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: b}), 0600); e != nil {
-		return nil, e
+		return nil, nil, e
 	}
 	e = writeNew(filepath.Join(dir, stem+".key"), pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(k)}), 0600)
-	return k, e
+	return k, issued, e
 }
 func createCA(dir, ip string) error {
 	ca := newCert("WeaveFTPd private CA", true)
 	ca.KeyUsage |= x509.KeyUsageCertSign | x509.KeyUsageCRLSign
-	key, e := signCert(dir, "ca", ca, nil, nil)
+	key, ca, e := signCert(dir, "ca", ca, nil, nil)
 	if e != nil {
 		return e
 	}
@@ -591,12 +597,12 @@ func createCA(dir, ip string) error {
 	server.DNSNames = []string{"localhost"}
 	server.IPAddresses = []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1"), net.ParseIP(ip)}
 	server.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
-	if _, e = signCert(dir, "server", server, ca, key); e != nil {
+	if _, _, e = signCert(dir, "server", server, ca, key); e != nil {
 		return e
 	}
 	client := newCert("LOCAL", false)
 	client.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
-	_, e = signCert(dir, "client", client, ca, key)
+	_, _, e = signCert(dir, "client", client, ca, key)
 	return e
 }
 func issueSlave(output, name, ip string) error {
@@ -637,13 +643,13 @@ func issueSlave(output, name, ip string) error {
 	}
 	c := newCert(name, false)
 	c.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
-	if _, e = signCert(target, "client", c, ca, key); e != nil {
+	if _, _, e = signCert(target, "client", c, ca, key); e != nil {
 		return e
 	}
 	server := newCert(name+" data", false)
 	server.IPAddresses = []net.IP{net.ParseIP(ip)}
 	server.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
-	if _, e = signCert(target, "server", server, ca, key); e != nil {
+	if _, _, e = signCert(target, "server", server, ca, key); e != nil {
 		return e
 	}
 	if e = writeNew(filepath.Join(target, "ca.crt"), cb, 0600); e != nil {
