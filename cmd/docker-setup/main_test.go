@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,35 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 )
+
+func assertIssuerKeyID(t *testing.T, dir, stem string) {
+	t.Helper()
+	read := func(name string) *x509.Certificate {
+		block, _ := pem.Decode(mustRead(t, filepath.Join(dir, name+".crt")))
+		if block == nil {
+			t.Fatalf("missing PEM certificate: %s", name)
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cert
+	}
+	ca, cert := read("ca"), read(stem)
+	if len(ca.SubjectKeyId) == 0 || !bytes.Equal(cert.AuthorityKeyId, ca.SubjectKeyId) {
+		t.Fatalf("%s: authority key ID %x does not identify CA %x", stem, cert.AuthorityKeyId, ca.SubjectKeyId)
+	}
+}
+
+func TestFreshCertificatesIdentifyIssuer(t *testing.T) {
+	dir := t.TempDir()
+	if err := createCA(dir, "192.0.2.10"); err != nil {
+		t.Fatal(err)
+	}
+	for _, stem := range []string{"server", "client"} {
+		assertIssuerKeyID(t, dir, stem)
+	}
+}
 
 func fixture(t *testing.T) (string, string, values) {
 	t.Helper()
@@ -136,6 +166,9 @@ func TestRemoteCertificate(t *testing.T) {
 		t.Fatal(e)
 	}
 	bundle := filepath.Join(out, "runtime/master/slave-certs/REMOTE1")
+	for _, stem := range []string{"server", "client"} {
+		assertIssuerKeyID(t, bundle, stem)
+	}
 	if _, e := os.Stat(filepath.Join(bundle, "ca.key")); !os.IsNotExist(e) {
 		t.Fatal("CA private key leaked into bundle")
 	}

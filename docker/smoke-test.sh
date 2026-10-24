@@ -69,6 +69,8 @@ import ftplib, io, ssl, sys, time, zlib
 from pathlib import Path
 runtime = Path(sys.argv[1])
 context = ssl.create_default_context(cafile=str(runtime/'etc/certs/ca.crt'))
+# Keep RFC-compliant chain validation enabled on older Python/OpenSSL too.
+context.verify_flags |= ssl.VERIFY_X509_STRICT
 class WeaveFTP(ftplib.FTP_TLS):
     def ntransfercmd(self, cmd, rest=None):
         # Route the data command to a slave before opening its passive socket.
