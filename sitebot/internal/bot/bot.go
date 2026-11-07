@@ -34,13 +34,15 @@ import (
 )
 
 type Bot struct {
-	Config    *Config
-	IRC       *irc.Bot
-	Plugins   *plugin.Manager
-	EventChan chan *event.Event
-	Done      chan bool
-	Mutex     sync.RWMutex
-	Debug     bool
+	Config      *Config
+	IRC         *irc.Bot
+	Plugins     *plugin.Manager
+	EventChan   chan *event.Event
+	Done        chan bool
+	Mutex       sync.RWMutex
+	Debug       bool
+	ircOper     bool
+	operPending bool
 }
 
 type controlConfig struct {
@@ -404,6 +406,8 @@ func uniqueChannels(cfg *Config) []string {
 func (b *Bot) listenIRC() {
 	var registeredOnce sync.Once
 	handler := func(line string) {
+		b.handleOperReply(line)
+		b.handleChannelModes(line)
 		if strings.Contains(line, " 004 ") || strings.Contains(line, " 376 ") || strings.Contains(line, " 422 ") {
 			registeredOnce.Do(func() {
 				b.onRegistered()
@@ -603,7 +607,7 @@ func (b *Bot) authWithNickServ() {
 func (b *Bot) onRegistered() {
 	b.authWithNickServ()
 
-	opered := false
+	b.ircOper, b.operPending = false, false
 	operUser := strings.TrimSpace(b.Config.IRC.OperUser)
 	if operUser == "" {
 		operUser = b.Config.IRC.Nick
@@ -614,7 +618,7 @@ func (b *Bot) onRegistered() {
 				log.Printf("[Bot] OPER failed: %v", err)
 			}
 		} else {
-			opered = true
+			b.operPending = true
 		}
 		// Give server time to process OPER and apply oper privileges before
 		// we try SAJOIN. UnrealIRCd's OPER â†’ +o is near-instant but still
@@ -636,13 +640,19 @@ func (b *Bot) onRegistered() {
 		}
 	}
 
+	if !b.operPending {
+		b.joinConfiguredChannels()
+	}
+}
+
+func (b *Bot) joinConfiguredChannels() {
 	// Join all configured channels. When oper'd, use SAJOIN to bypass +i
 	// (invite-only) and +R (registered-only) modes â€” this is how scene
 	// bots get into staff/ops channels without needing a permanent invite.
 	// Follow up with SAMODE +o so the bot has channel ops and can kick/ban
 	// / manage the channel later if needed.
 	for _, ch := range uniqueChannels(b.Config) {
-		if opered {
+		if b.ircOper {
 			_ = b.IRC.SendRaw(fmt.Sprintf("SAJOIN %s %s", b.Config.IRC.Nick, ch))
 			// Small gap so SAJOIN lands before SAMODE hits the same channel.
 			time.Sleep(150 * time.Millisecond)

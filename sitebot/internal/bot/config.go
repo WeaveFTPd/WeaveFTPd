@@ -54,6 +54,7 @@ type IRCConfig struct {
 	OperPassword  string         `yaml:"operpassword"`
 	AutoOper      bool           `yaml:"auto_oper"`
 	UserModes     string         `yaml:"user_modes"`
+	ChannelModes  string         `yaml:"channel_modes"`
 	AutoJoinDelay int            `yaml:"autojoin_delay_ms"`
 }
 
@@ -102,6 +103,11 @@ func LoadConfig(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, err
 	}
+	modes, err := normalizeChannelModes(cfg.IRC.ChannelModes)
+	if err != nil {
+		return nil, err
+	}
+	cfg.IRC.ChannelModes = modes
 	cfg.Version = loadVersion(path, cfg.Version)
 	if strings.TrimSpace(cfg.Version) == "" {
 		if idx := strings.LastIndex(strings.TrimSpace(cfg.IRC.RealName), " v"); idx >= 0 {
@@ -357,6 +363,7 @@ func (c *Config) Rehash() (string, error) {
 	// IRC connection details: keep old. Only refresh auto-join list + modes.
 	c.IRC.Channels = fresh.IRC.Channels
 	c.IRC.UserModes = fresh.IRC.UserModes
+	c.IRC.ChannelModes = fresh.IRC.ChannelModes
 	c.IRC.AutoJoinDelay = fresh.IRC.AutoJoinDelay
 	c.IRC.AutoOper = fresh.IRC.AutoOper
 	c.IRC.OperUser = fresh.IRC.OperUser
