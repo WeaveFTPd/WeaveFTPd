@@ -41,6 +41,9 @@ var (
 
 func registerSession(s *Session) uint64 {
 	id := nextSessionID.Add(1)
+	s.ID = id
+	s.controlTransport = s.Conn
+	s.remoteAddress = remoteAddrString(s.Conn)
 	activeSessions.Store(id, s)
 	return id
 }
@@ -143,10 +146,10 @@ func listActiveSessions() []sessionSnapshot {
 		}
 		snap := sessionSnapshot{
 			ID:         s.ID,
-			Remote:     remoteAddrString(s.Conn),
+			Remote:     s.remoteAddress,
 			CurrentDir: s.CurrentDir,
 			StartedAt:  s.StartedAt,
-			LoggedIn:   s.IsLogged,
+			LoggedIn:   s.IsLogged && !s.disconnected.Load(),
 		}
 		s.stateMu.RLock()
 		snap.LastCommandAt = s.LastCommandAt
@@ -157,7 +160,7 @@ func listActiveSessions() []sessionSnapshot {
 		snap.TransferSlaveName = s.TransferSlaveName
 		snap.TransferSlaveIdx = s.TransferSlaveIdx
 		s.stateMu.RUnlock()
-		if s.IsLogged && s.User != nil {
+		if snap.LoggedIn && s.User != nil {
 			snap.User = s.User.Name
 			snap.PrimaryGroup = s.User.PrimaryGroup
 			snap.Flags = s.User.Flags
@@ -228,7 +231,7 @@ func countSessionsForUser(username string) int {
 	count := 0
 	activeSessions.Range(func(key, value interface{}) bool {
 		s, ok := value.(*Session)
-		if !ok || s == nil || !s.IsLogged || s.User == nil {
+		if !ok || s == nil || s.disconnected.Load() || !s.IsLogged || s.User == nil {
 			return true
 		}
 		if strings.EqualFold(s.User.Name, username) {
@@ -272,7 +275,7 @@ func countSessionsForGroup(group string) int {
 	count := 0
 	activeSessions.Range(func(key, value interface{}) bool {
 		s, ok := value.(*Session)
-		if !ok || s == nil || !s.IsLogged || s.User == nil {
+		if !ok || s == nil || s.disconnected.Load() || !s.IsLogged || s.User == nil {
 			return true
 		}
 		if s.User.IsInGroup(group) {
@@ -292,11 +295,14 @@ func DisconnectActiveSession(id uint64) bool {
 		return false
 	}
 	s, ok := val.(*Session)
-	if !ok || s == nil || s.Conn == nil {
+	if !ok || s == nil || s.controlTransport == nil {
 		return false
 	}
+	if s.disconnected.Swap(true) {
+		return true
+	}
 	s.abortCurrentTransfer("session disconnected")
-	_ = s.Conn.Close()
+	_ = s.controlTransport.Close()
 	return true
 }
 
@@ -312,8 +318,13 @@ func kickActiveUser(username string) int {
 			return true
 		}
 		if strings.EqualFold(s.User.Name, username) {
+			if s.disconnected.Swap(true) {
+				return true
+			}
 			s.abortCurrentTransfer("user kicked")
-			_ = s.Conn.Close()
+			if s.controlTransport != nil {
+				_ = s.controlTransport.Close()
+			}
 			kicked++
 		}
 		return true

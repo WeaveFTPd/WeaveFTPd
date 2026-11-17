@@ -1097,6 +1097,8 @@ func (s *Slave) handleReceive(ac *protocol.AsyncCommand) interface{} {
 	t.SetTransferMode(transferType)
 
 	// Acknowledge to master that we're starting (: sendResponse(new AsyncResponse(ac.getIndex())))
+	// Publish the pending receiver before ACK makes the file visible on master.
+	s.registerUpload(t)
 	s.writeObject(&protocol.AsyncResponse{Index: ac.Index})
 
 	// Actually receive the file - this blocks until done

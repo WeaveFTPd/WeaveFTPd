@@ -80,6 +80,8 @@ type Services struct {
 	GetLiveTransferStats func() []LiveTransferStat
 	DisconnectSession    func(id uint64) bool
 	AbortTransfer        func(slaveName string, transferIndex int32, reason string) bool
+	AbortSessionTransfer func(snapshot ActiveSession, reason string) bool
+	ReleaseRoot          func(filePath string) string
 }
 
 type ActiveSession struct {
@@ -146,6 +148,10 @@ type MKDirValidator interface {
 
 type LoginValidator interface {
 	ValidateLogin(u *user.User, remoteIP string) error
+}
+
+type UploadValidator interface {
+	ValidateUpload(u *user.User, targetPath string) error
 }
 
 type ConfigReloader interface {

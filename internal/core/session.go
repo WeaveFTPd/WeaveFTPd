@@ -51,6 +51,12 @@ func sanitizeLoggedFTPLine(line string) string {
 
 // Session represents an active FTP client connection and its state.
 type Session struct {
+	// Immutable after registration; Conn is replaced by the command loop on AUTH TLS.
+	controlTransport net.Conn
+	remoteAddress    string
+	// A kicked session releases its login slot before its handler returns.
+	disconnected atomic.Bool
+
 	ID            uint64
 	Conn          net.Conn
 	User          *user.User
@@ -133,7 +139,7 @@ func HandleSession(conn net.Conn, tlsConfig *tls.Config, cfg *Config, aclEngine 
 		StartedAt:     time.Now(),
 		LastCommandAt: time.Now(),
 	}
-	session.ID = registerSession(session)
+	registerSession(session)
 	defer unregisterSession(session.ID)
 	defer session.Conn.Close()
 
@@ -147,6 +153,9 @@ func HandleSession(conn net.Conn, tlsConfig *tls.Config, cfg *Config, aclEngine 
 	for {
 		line, err := readLinePure(controlReader)
 		if err != nil {
+			return
+		}
+		if session.disconnected.Load() {
 			return
 		}
 
@@ -292,6 +301,13 @@ func finishFileDataSend(conn net.Conn, tlsClientMode bool) error {
 		conn = tracked.Conn
 	}
 	return netutil.FinishDataSend(conn, tlsClientMode)
+}
+
+func abortFileDataSend(conn net.Conn) {
+	if tracked, ok := conn.(*bandwidthTrackingConn); ok {
+		conn = tracked.Conn
+	}
+	_ = netutil.AbortDataSend(conn)
 }
 
 // upgradeDataTLS applies encryption to the data connection if PROT P is enabled.

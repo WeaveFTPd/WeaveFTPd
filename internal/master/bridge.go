@@ -1034,6 +1034,10 @@ func (b *Bridge) writeUploadRecord(rec uploadRecord) {
 //  4. Tell slave to SEND the file
 //  5. Bridge data: read from slave, write to clientData
 func (b *Bridge) DownloadFile(filePath string, clientData net.Conn, username, primaryGroup string, position int64, transferType byte) (uint32, error) {
+	return b.DownloadFileTracked(filePath, clientData, username, primaryGroup, position, transferType, nil)
+}
+
+func (b *Bridge) DownloadFileTracked(filePath string, clientData net.Conn, username, primaryGroup string, position int64, transferType byte, onReady core.TransferReadyFunc) (uint32, error) {
 	slave := b.selectSlaveForDownloadIncludingPending(filePath)
 	if slave == nil {
 		return 0, fmt.Errorf("file not found on any available slave: %s", filePath)
@@ -1060,6 +1064,9 @@ func (b *Bridge) DownloadFile(filePath string, clientData net.Conn, username, pr
 
 	slaveAddr := net.JoinHostPort(slave.GetPASVIP(), strconv.Itoa(transferResp.Info.Port))
 	log.Printf("[Bridge] Connecting to slave %s at %s for download of %s", slave.Name(), slaveAddr, filePath)
+	if onReady != nil {
+		onReady(slave.Name(), transferResp.Info.TransferIndex)
+	}
 
 	slaveConn, err := net.DialTimeout("tcp", slaveAddr, 10*time.Second)
 	if err != nil {
@@ -1158,6 +1165,11 @@ func (b *Bridge) cleanupZipDizAfterDelete(filePath string) {
 func (b *Bridge) RenameFile(from, toDir, toName string) error {
 	vfsFile := b.sm.GetVFS().GetFile(from)
 	toPath := path.Join(toDir, toName)
+	if target := b.sm.GetVFS().GetFile(toPath); target != nil && target.VirtualOnly {
+		return fmt.Errorf("cannot replace a virtual link: %s", toPath)
+	}
+	toPath = b.ResolvePath(toPath)
+	toDir, toName = path.Dir(toPath), path.Base(toPath)
 	if err := b.sm.RenameFile(from, toDir, toName); err != nil {
 		return err
 	}
@@ -1729,7 +1741,7 @@ func (b *Bridge) Symlink(linkPath, targetPath string) error {
 func (b *Bridge) VFSSymlink(linkPath, targetPath string) error {
 	linkPath = cleanBridgeVFSPath(linkPath)
 	targetPath = cleanBridgeVFSPath(targetPath)
-	b.sm.GetVFS().AddSymlink(linkPath, targetPath)
+	b.sm.GetVFS().AddVirtualSymlink(linkPath, targetPath)
 	return nil
 }
 

@@ -24,6 +24,7 @@ type VFSFile struct {
 	Size         int64
 	IsDir        bool
 	IsSymlink    bool
+	VirtualOnly  bool // Master-owned link; slave scans must not replace it.
 	LinkTarget   string
 	Mode         uint32
 	LastModified int64
@@ -190,6 +191,11 @@ func (vfs *VirtualFileSystem) AddFile(path string, file VFSFile) {
 		vfs.deleteFileEntryOnlyLocked(path)
 		vfs.invalidateRaceCachesForPathLocked(path)
 		return
+	}
+	for ancestor := path; ancestor != "/" && ancestor != "."; ancestor = cleanVFSPath(filepath.Dir(ancestor)) {
+		if entry := vfs.files[ancestor]; entry != nil && entry.IsSymlink && entry.VirtualOnly {
+			return
+		}
 	}
 	if vfs.protectedDirs[path] {
 		file.IsDir = true
@@ -386,16 +392,28 @@ func (vfs *VirtualFileSystem) SetExcludePaths(paths []string) {
 }
 
 func (vfs *VirtualFileSystem) AddSymlink(linkPath, targetPath string) {
+	vfs.addSymlink(linkPath, targetPath, false)
+}
+
+func (vfs *VirtualFileSystem) AddVirtualSymlink(linkPath, targetPath string) {
+	vfs.addSymlink(linkPath, targetPath, true)
+}
+
+func (vfs *VirtualFileSystem) addSymlink(linkPath, targetPath string, virtualOnly bool) {
 	vfs.mu.Lock()
 	defer vfs.mu.Unlock()
 
 	linkPath = cleanVFSPath(linkPath)
 	targetPath = cleanVFSPath(targetPath)
+	if existing := vfs.files[linkPath]; virtualOnly && existing != nil && (!existing.IsSymlink || !existing.VirtualOnly) {
+		// Drop shadow entries from the index only, never files on slave storage.
+		vfs.deletePathLocked(linkPath)
+	}
 	isDir := true
 	if target := vfs.files[targetPath]; target != nil {
 		isDir = target.IsDir
 	}
-	if existing := vfs.files[linkPath]; existing != nil && existing.IsSymlink && existing.LinkTarget == targetPath {
+	if existing := vfs.files[linkPath]; existing != nil && existing.IsSymlink && existing.LinkTarget == targetPath && existing.VirtualOnly == virtualOnly {
 		cp := *existing
 		cp.IsDir = isDir
 		cp.Seen = true
@@ -406,6 +424,7 @@ func (vfs *VirtualFileSystem) AddSymlink(linkPath, targetPath string) {
 		Path:         linkPath,
 		IsDir:        isDir,
 		IsSymlink:    true,
+		VirtualOnly:  virtualOnly,
 		LinkTarget:   targetPath,
 		Mode:         0777,
 		LastModified: time.Now().Unix(),

@@ -624,6 +624,10 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 			}
 		}
 
+		if err := s.Config.ValidateSectionWritePath(targetPath); err != nil {
+			fmt.Fprintf(s.Conn, "550 %s\r\n", err)
+			return false
+		}
 		aclPath := path.Join(s.Config.ACLBasePath, targetPath)
 		if !s.ACLEngine.CanPerform(s.User, "MKD", aclPath) {
 			fmt.Fprintf(s.Conn, "550 Access Denied: Insufficient flags.\r\n")
@@ -822,6 +826,11 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 		}
 		fromPath := resolveSessionPath(s.CurrentDir, s.RenameFrom)
 		toPath := resolveSessionPath(s.CurrentDir, args[0])
+		if err := s.Config.ValidateSectionWritePath(toPath); err != nil {
+			fmt.Fprintf(s.Conn, "550 %s\r\n", err)
+			s.RenameFrom = ""
+			return false
+		}
 		toDir := path.Dir(toPath)
 		toName := path.Base(toPath)
 		if toName == "" || toName == "." || toName == "/" || toName == ".." {
@@ -867,6 +876,23 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 		if err != nil {
 			fmt.Fprintf(s.Conn, "504 %s\r\n", err.Error())
 			return false
+		}
+		if preparedCmd == "STOR" {
+			target := path.Clean(path.Join(s.CurrentDir, preparedArg))
+			if path.IsAbs(preparedArg) {
+				target = path.Clean(preparedArg)
+			}
+			if bridge, ok := s.MasterManager.(MasterBridge); ok {
+				target = bridge.ResolvePath(target)
+			}
+			if err := s.Config.ValidateSectionWritePath(target); err != nil {
+				fmt.Fprintf(s.Conn, "550 %s\r\n", err)
+				return false
+			}
+			if err := s.Config.PluginManager.ValidateUpload(s.User, target); err != nil {
+				fmt.Fprintf(s.Conn, "550 %s\r\n", err)
+				return false
+			}
 		}
 		if s.Config.XdupeEnabled && preparedCmd == "STOR" && preparedArg != "" && s.Config.Mode == "master" && s.MasterManager != nil {
 			if bridge, ok := s.MasterManager.(MasterBridge); ok {
@@ -1526,7 +1552,15 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 			}
 		}
 		uploadDir = path.Dir(uploadPath)
+		if err := s.Config.ValidateSectionWritePath(uploadPath); err != nil {
+			fmt.Fprintf(s.Conn, "550 %s\r\n", err)
+			return false
+		}
 		fileName = path.Base(uploadPath)
+		if err := s.Config.PluginManager.ValidateUpload(s.User, uploadPath); err != nil {
+			fmt.Fprintf(s.Conn, "550 %s\r\n", err)
+			return false
+		}
 		getMasterUploadEntries := func(bridge MasterBridge) []MasterFileEntry {
 			if !masterUploadEntriesLoaded {
 				masterUploadEntries = bridge.ListDir(uploadDir)
@@ -2014,7 +2048,11 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 			fmt.Fprintf(s.Conn, "550 No Permission To Download A File Currently Being Uploaded.\r\n")
 			return false
 		}
-		defer releaseDownloadPath(filePath)
+		download := newLiveDownload(filePath, sourceUpload)
+		defer download.finish()
+		if listener := s.DataListen; listener != nil {
+			download.onCancel(func() { _ = listener.Close() })
+		}
 		following := sourceUpload != nil
 
 		if s.Config.Mode == "master" && s.MasterManager != nil {
@@ -2072,10 +2110,12 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 					defer s.endTransfer()
 					onTransferReady := func(slaveName string, transferIdx int32) {
 						s.attachTransferToSlave(slaveName, transferIdx)
+						download.trackSlave(s.MasterManager, slaveName, transferIdx)
 					}
 
 					transferChecksum, xferMs, err := bridge.SlaveConnectAndSend(filePath, portAddr, s.User.Name, s.User.PrimaryGroup, restOffset, s.DataTLS, s.SSCN, s.currentTransferTypeByte(), onTransferReady)
 					if err != nil {
+						download.finish()
 						if s.Config != nil && s.Config.Debug {
 							log.Printf("[Passthrough] PORT download failed for user %s path %s: %s", s.User.Name, filePath, formatTransferFailureLog(err))
 						}
@@ -2085,6 +2125,7 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 
 					if following {
 						if err := sourceUpload.wait(); err != nil {
+							download.finish()
 							writeTransferFailure(s.Conn, "Download", err)
 							return false
 						}
@@ -2112,6 +2153,7 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 					log.Printf("[Passthrough] RETR %s by %s via slave %s (xferIdx=%d)", filePath, s.User.Name, slaveName, s.PassthruXferIdx)
 					s.beginTransferOnSlave("download", filePath, slaveName, s.PassthruXferIdx)
 					defer s.endTransfer()
+					download.trackSlave(s.MasterManager, slaveName, s.PassthruXferIdx)
 
 					start := time.Now()
 					transferChecksum, xferMs, err := bridge.SlaveSendPassthrough(filePath, s.PassthruXferIdx, slaveName, s.User.Name, s.User.PrimaryGroup, restOffset, s.currentTransferTypeByte())
@@ -2126,10 +2168,12 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 						if s.Config != nil && s.Config.Debug {
 							log.Printf("[Passthrough] Download failed for user %s path %s: %s", s.User.Name, filePath, formatTransferFailureLog(err))
 						}
+						download.finish()
 						writeTransferFailure(s.Conn, "Download", err)
 					} else {
 						if following {
 							if err := sourceUpload.wait(); err != nil {
+								download.finish()
 								writeTransferFailure(s.Conn, "Download", err)
 								return false
 							}
@@ -2155,6 +2199,7 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 						fmt.Fprintf(s.Conn, "425 Data connection failed\r\n")
 						return false
 					}
+					download.trackConn(raw)
 					fmt.Fprintf(s.Conn, "150 Opening %s mode data connection for %s (%d bytes).\r\n", transferTypeReplyName(s.TransferType), args[0], fileSize)
 					tlsClientMode := s.SSCN || s.nextDataTLSClientMode
 					dataConn, err := s.upgradeFileDataTLS(raw, tlsConfig)
@@ -2166,31 +2211,38 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 					defer s.endTransfer()
 					dataConn = trackTransferConn(s, dataConn, "download")
 					start := time.Now()
-					transferChecksum, err := bridge.DownloadFile(filePath, dataConn, s.User.Name, s.User.PrimaryGroup, restOffset, s.currentTransferTypeByte())
+					var transferChecksum uint32
+					if tracked, ok := bridge.(trackedDownloadBridge); ok && following {
+						transferChecksum, err = tracked.DownloadFileTracked(filePath, dataConn, s.User.Name, s.User.PrimaryGroup, restOffset, s.currentTransferTypeByte(), func(name string, index int32) {
+							download.trackSlave(s.MasterManager, name, index)
+						})
+					} else {
+						transferChecksum, err = bridge.DownloadFile(filePath, dataConn, s.User.Name, s.User.PrimaryGroup, restOffset, s.currentTransferTypeByte())
+					}
 					xferMs := time.Since(start).Milliseconds()
+					if err == nil && following {
+						err = sourceUpload.wait()
+						if err == nil {
+							finalSize := bridge.GetFileSize(filePath)
+							if finalSize < restOffset || zipscript.ShouldTreatDownloadAsMissing(s.Config.Zipscript, sfvBridge(bridge), filePath, log.Printf) {
+								err = fmt.Errorf("source upload failed verification")
+							} else {
+								remainingSize = finalSize - restOffset
+							}
+						}
+					}
 					if err == nil {
 						err = finishFileDataSend(dataConn, tlsClientMode)
 					} else {
-						dataConn.Close()
+						abortFileDataSend(dataConn)
 					}
 					s.PretCmd = ""
 					s.PretArg = ""
 					if err != nil {
 						log.Printf("[MASTER] Download failed: %v", err)
+						download.finish()
 						writeTransferFailure(s.Conn, "Download", err)
 					} else {
-						if following {
-							if err := sourceUpload.wait(); err != nil {
-								writeTransferFailure(s.Conn, "Download", err)
-								return false
-							}
-							finalSize := bridge.GetFileSize(filePath)
-							if finalSize < restOffset || zipscript.ShouldTreatDownloadAsMissing(s.Config.Zipscript, sfvBridge(bridge), filePath, log.Printf) {
-								writeTransferFailure(s.Conn, "Download", fmt.Errorf("source upload failed verification"))
-								return false
-							}
-							remainingSize = finalSize - restOffset
-						}
 						if restOffset == 0 {
 							handleMasterDownloadSFVChecksum(s, bridge, filePath, transferChecksum)
 						}
@@ -2262,6 +2314,7 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 			fmt.Fprintf(s.Conn, "425 Data connection failed\r\n")
 			return false
 		}
+		download.trackConn(raw)
 		fmt.Fprintf(s.Conn, "150 Opening %s mode data connection for %s (%d bytes).\r\n", transferTypeReplyName(s.TransferType), args[0], fileSize)
 		tlsClientMode := s.SSCN || s.nextDataTLSClientMode
 		dataConn, err := s.upgradeFileDataTLS(raw, tlsConfig)
@@ -2272,14 +2325,14 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 
 		file, err := os.Open(localPath)
 		if err != nil {
-			dataConn.Close()
+			abortFileDataSend(dataConn)
 			writeTransferFailure(s.Conn, "Download", err)
 			return false
 		}
 		defer file.Close()
 		if restOffset > 0 {
 			if _, err := file.Seek(restOffset, io.SeekStart); err != nil {
-				dataConn.Close()
+				abortFileDataSend(dataConn)
 				writeTransferFailure(s.Conn, "Download", err)
 				return false
 			}
@@ -2296,24 +2349,24 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 		}
 		written, err := copyTransferData(dataConn, reader)
 		xferMs := time.Since(start).Milliseconds()
+		if err == nil && following {
+			err = sourceUpload.wait()
+			if err == nil {
+				if info, statErr := os.Stat(localPath); statErr != nil || info.Size() < restOffset || zipscript.LocalShouldTreatDownloadAsMissing(s.Config.Zipscript, filePath, localPath) {
+					err = fmt.Errorf("source upload failed verification")
+				}
+			}
+		}
 		if err == nil {
 			err = finishFileDataSend(dataConn, tlsClientMode)
 		} else {
-			dataConn.Close()
+			abortFileDataSend(dataConn)
 		}
 		if err != nil {
+			file.Close()
+			download.finish()
 			writeTransferFailure(s.Conn, "Download", err)
 			return false
-		}
-		if following {
-			if err := sourceUpload.wait(); err != nil {
-				writeTransferFailure(s.Conn, "Download", err)
-				return false
-			}
-			if info, statErr := os.Stat(localPath); statErr != nil || info.Size() < restOffset || zipscript.LocalShouldTreatDownloadAsMissing(s.Config.Zipscript, filePath, localPath) {
-				writeTransferFailure(s.Conn, "Download", fmt.Errorf("source upload failed verification"))
-				return false
-			}
 		}
 		remainingSize = written
 		fmt.Fprintf(s.Conn, "226 Transfer complete.\r\n")

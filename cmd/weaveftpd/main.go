@@ -352,8 +352,12 @@ func main() {
 			}
 			return out
 		},
-		ListActiveSessions: core.ListActiveSessionsForPlugins,
-		DisconnectSession:  core.DisconnectActiveSession,
+		ListActiveSessions:   core.ListActiveSessionsForPlugins,
+		DisconnectSession:    core.DisconnectActiveSession,
+		AbortSessionTransfer: core.AbortActiveSessionTransfer,
+		ReleaseRoot: func(filePath string) string {
+			return core.SlowkickReleaseRoot(cfg.Zipscript, filePath)
+		},
 		GetLiveTransferStats: func() []plugin.LiveTransferStat {
 			if masterBridge == nil {
 				return nil

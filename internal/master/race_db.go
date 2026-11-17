@@ -522,7 +522,7 @@ func mergeRaceFileRecord(next, existing ReleaseFileRecord) ReleaseFileRecord {
 
 func (r *RaceDB) DeletePath(path string, isDir bool) error {
 	if isDir {
-		_, err := r.db.Exec(`DELETE FROM releases WHERE path = ? OR path LIKE ?`, path, path+"/%")
+		_, err := r.db.Exec(`DELETE FROM releases WHERE path = ? OR substr(path, 1, length(?) + 1) = ? || '/'`, path, path, path)
 		if err == nil {
 			r.invalidateReleaseIDPrefix(path)
 		}
@@ -553,7 +553,9 @@ func (r *RaceDB) RenamePath(from, to string, isDir bool) error {
 		}
 		defer tx.Rollback()
 
-		rows, err := tx.Query(`SELECT path FROM releases WHERE path = ? OR path LIKE ?`, from, from+"/%")
+		// LIKE folds ASCII case and treats release-name underscores as wildcards.
+		// Filesystem mutations must only select the exact directory subtree.
+		rows, err := tx.Query(`SELECT path FROM releases WHERE path = ? OR substr(path, 1, length(?) + 1) = ? || '/'`, from, from, from)
 		if err != nil {
 			return err
 		}
@@ -567,6 +569,12 @@ func (r *RaceDB) RenamePath(from, to string, isDir bool) error {
 			}
 			paths = append(paths, p)
 		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
 		sort.Slice(paths, func(i, j int) bool { return len(paths[i]) > len(paths[j]) })
 
 		for _, oldPath := range paths {
@@ -579,6 +587,7 @@ func (r *RaceDB) RenamePath(from, to string, isDir bool) error {
 			return err
 		}
 		r.invalidateReleaseIDPrefix(from)
+		r.invalidateReleaseIDPrefix(to)
 		return nil
 	}
 
@@ -620,9 +629,9 @@ func (r *RaceDB) ScrubReleaseRaceMetadata(dirPath, owner, group string) error {
             duration_ms = 0,
             updated_at = strftime('%s','now')
         WHERE release_id IN (
-            SELECT id FROM releases WHERE path = ? OR path LIKE ?
+            SELECT id FROM releases WHERE path = ? OR substr(path, 1, length(?) + 1) = ? || '/'
         )
-    `, owner, group, dirPath, dirPath+"/%")
+    `, owner, group, dirPath, dirPath, dirPath)
 	return err
 }
 

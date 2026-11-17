@@ -238,6 +238,9 @@ slave:
 #  be listed here.
 #  Read-only slaves are never modified.
 # =============================================================================
+# Reject MKD/STOR/PRET STOR/RNTO using a case variant of a configured section.
+# Existing paths remain readable. Correct clients before enabling this option.
+strict_section_case: false
 sections:
   - "/0DAY"
   - "/APPS"
@@ -453,6 +456,7 @@ zipscript:
       # plus WEAVEFTPD_<KEY> for zipscript race vars such as T_MBYTES/T_FILES/etc.
 
   sfv:
+    strict_release_root: false # opt in: SFV first and listed data files only in SFV release roots; sidecars/subdirs/ZIP sections keep their policies
     force_first: false         # pzs-ng style: allow payload before .sfv; the release is checked once the .sfv lands
     deny_double_sfv: true      # reject a second .sfv in the same release dir
     restrict_files: true       # once an .sfv exists, payload files should be listed in it

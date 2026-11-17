@@ -15,6 +15,10 @@ monitor_downloads: true
 min_upload_speed_kbps: 25
 # Grace period before upload minspeed enforcement starts.
 verify_upload_seconds: 5
+# Average transferred bytes over a full rolling window (seconds).
+# 0 keeps legacy speed checks. Suggested for racing: 10.
+# The window starts at the first data byte, excluding connection/TLS setup.
+upload_window_seconds: 0
 
 # Download-specific floor in KB/s.
 min_download_speed_kbps: 50
@@ -48,5 +52,11 @@ announce_kick: true
 # slow kick and grabbing another slot.
 tempban_after_kick: true
 tempban_seconds: 15
+# site: legacy disconnect and login ban.
+# release: abort only the slow upload, keep its FTP connection, and block
+# new uploads by this user to the same release (including subdirectories).
+# Uses configured zipscript release depths; unknown releases are not aborted.
+# Downloads retain their existing kick behavior, without a login ban in this mode.
+ban_scope: site
 
 debug: false
