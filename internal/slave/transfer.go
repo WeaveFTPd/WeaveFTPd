@@ -89,16 +89,18 @@ type Transfer struct {
 	activeAddress string
 	mode          byte
 
-	path          string
-	direction     byte
-	started       time.Time
-	finished      time.Time
-	transferred   atomic.Int64
-	checksum      uint32
-	abortReason   string
-	terminalError string
-	claimed       atomic.Bool // set once ReceiveFile/SendFile takes ownership
-	mu            sync.Mutex
+	path            string
+	direction       byte
+	started         time.Time
+	finished        time.Time
+	transferred     atomic.Int64
+	checksum        uint32
+	abortReason     string
+	terminalError   string
+	claimed         atomic.Bool // set once ReceiveFile/SendFile takes ownership
+	uploadReady     chan struct{}
+	uploadReadyOnce sync.Once
+	mu              sync.Mutex
 }
 
 func NewTransfer(listener net.Listener, conn net.Conn, idx int32, slave *Slave, encrypted bool, sslClientMode bool) *Transfer {
@@ -111,6 +113,7 @@ func NewTransfer(listener net.Listener, conn net.Conn, idx int32, slave *Slave, 
 		sslClientMode: sslClientMode,
 		direction:     TransferUnknown,
 		mode:          'I',
+		uploadReady:   make(chan struct{}),
 	}
 }
 
@@ -199,12 +202,16 @@ func (t *Transfer) ReceiveFile(path string, position int64, expectedPeer string)
 	t.mu.Lock()
 	t.direction = TransferUnknown
 	t.started = time.Time{}
+	t.path = path
 	t.mu.Unlock()
+	t.slave.registerUpload(t)
 
 	defer func() {
 		t.mu.Lock()
 		t.finished = time.Now()
 		t.mu.Unlock()
+		t.signalUploadReady()
+		t.slave.unregisterUpload(t)
 		t.slave.removeTransfer(t.transferIndex)
 	}()
 
@@ -259,8 +266,7 @@ func (t *Transfer) ReceiveFile(path string, position int64, expectedPeer string)
 	// speeds get deflated by a fixed per-file overhead (glftpd/drftpd measure
 	// pure data time only).
 	t.mu.Unlock()
-	t.slave.registerUpload(t)
-	defer t.slave.unregisterUpload(t)
+	t.signalUploadReady()
 
 	// Transfer with CRC32. Disk writes (and CRC) run on a separate goroutine
 	// with double buffering so the socket read is never stalled behind a disk
@@ -426,6 +432,10 @@ func (t *Transfer) ReceiveFile(path string, position int64, expectedPeer string)
 
 func cleanupFailedReceive(file *os.File, fullPath string, position int64) {
 	if position <= 0 {
+		// Windows cannot remove our still-open file; the writer has been joined.
+		if file != nil {
+			_ = file.Close()
+		}
 		_ = os.Remove(fullPath)
 		return
 	}
@@ -460,15 +470,22 @@ func (t *Transfer) SendFile(path string, position int64, expectedPeer string) pr
 	if conn == nil {
 		return t.errorStatus("no connection")
 	}
-	defer conn.Close()
+	completed := false
+	defer func() {
+		if completed {
+			_ = conn.Close()
+		} else {
+			_ = netutil.AbortDataSend(conn)
+		}
+	}()
 	if isUnexpectedTransferPeer(expectedPeer, conn.RemoteAddr()) {
 		log.Printf("[Transfer] rejected send: peer %s does not match expected %q (idx=%d)", conn.RemoteAddr(), expectedPeer, t.transferIndex)
 		return t.errorStatus("The IP that connected to the socket was not the one that was expected.")
 	}
-	t.mu.Lock()
-	t.direction = TransferSending
-	t.started = time.Now()
-	t.mu.Unlock()
+	associatedUpload := t.findAssociatedUpload(path)
+	if err := t.waitForUploadReady(associatedUpload); err != nil {
+		return t.errorStatus(err.Error())
+	}
 
 	// Find the file across roots
 	fullPath, err := t.slave.getFileFromRoots(path)
@@ -488,7 +505,10 @@ func (t *Transfer) SendFile(path string, position int64, expectedPeer string) pr
 	}
 
 	lastStatus := time.Now()
-	associatedUpload := t.findAssociatedUpload(path)
+	t.mu.Lock()
+	t.direction = TransferSending
+	t.started = time.Now()
+	t.mu.Unlock()
 
 	// The zero-copy sendfile(2) fast path is valid for plaintext downloads. TLS
 	// needs userspace encryption.
@@ -583,6 +603,7 @@ func (t *Transfer) SendFile(path string, position int64, expectedPeer string) pr
 	if err := netutil.FinishDataSend(conn, t.sslClientMode); err != nil {
 		return t.errorStatus(fmt.Sprintf("data shutdown failed: %v", err))
 	}
+	completed = true
 
 	transferred := t.transferred.Load()
 	log.Printf("[Transfer] Sent %s (%d bytes, offset=%d)", path, transferred, position)
@@ -757,7 +778,7 @@ func (t *Transfer) Abort(reason string) {
 	listener := t.listener
 	t.mu.Unlock()
 	if conn != nil {
-		conn.Close()
+		_ = netutil.AbortDataSend(conn)
 	}
 	if listener != nil {
 		listener.Close()
@@ -788,6 +809,45 @@ func (t *Transfer) isFinished() bool {
 
 func (t *Transfer) findAssociatedUpload(path string) *Transfer {
 	return t.slave.findUploadByPath(path, t)
+}
+
+func (t *Transfer) signalUploadReady() {
+	t.uploadReadyOnce.Do(func() { close(t.uploadReady) })
+}
+
+// A receive ACK reserves a path before data connection setup creates the file.
+// Follow only that upload generation; do not wait for an arbitrary missing file.
+func (t *Transfer) waitForUploadReady(upload *Transfer) error {
+	if upload == nil {
+		return nil
+	}
+	deadline := time.NewTimer(t.setupTimeout())
+	defer deadline.Stop()
+	tick := time.NewTicker(transferPollTick)
+	defer tick.Stop()
+	for {
+		if reason := t.abortSnapshot(); reason != "" {
+			return fmt.Errorf("aborted: %s", reason)
+		}
+		if finished, failure := upload.uploadOutcome(); finished {
+			if failure != "" {
+				return fmt.Errorf("source upload failed: %s", failure)
+			}
+			return nil
+		}
+		upload.mu.Lock()
+		ready := upload.direction == TransferReceiving
+		upload.mu.Unlock()
+		if ready {
+			return nil
+		}
+		select {
+		case <-deadline.C:
+			return fmt.Errorf("source upload setup timed out")
+		case <-upload.uploadReady:
+		case <-tick.C:
+		}
+	}
 }
 
 func (t *Transfer) currentStatus(finished bool, errMsg string) protocol.TransferStatus {

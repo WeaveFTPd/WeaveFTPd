@@ -47,6 +47,8 @@ type Config struct {
 	// VFS and create on matching writable slaves. Nested dirs such as
 	// "/FOREIGN/TV-NL" are supported.
 	Sections []string `yaml:"sections"`
+	// Reject writes through case variants of configured section paths.
+	StrictSectionCase bool `yaml:"strict_section_case"`
 	// HiddenVFSPaths are master-side virtual paths/subtrees that should be
 	// suppressed from the VFS even if they exist on a slave.
 	HiddenVFSPaths []string `yaml:"hidden_vfs_paths"`
@@ -585,6 +587,7 @@ func (c *Config) Rehash() (string, error) {
 	// Slaves policy
 	c.Slaves = fresh.Slaves
 	c.Sections = fresh.Sections
+	c.StrictSectionCase = fresh.StrictSectionCase
 	c.API = fresh.API
 
 	// Security / TLS policy (policy toggles, not socket-level TLS itself)

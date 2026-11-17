@@ -15,6 +15,10 @@ import (
 const slowkickMonitorInterval = time.Second
 
 type Handler struct {
+	uploadWindow          time.Duration
+	banScope              string
+	samples               map[string][]speedSample
+	releaseBans           map[releaseBanKey]time.Time
 	svc                   *plugin.Services
 	enabled               bool
 	monitorUploads        bool
@@ -41,6 +45,8 @@ type Handler struct {
 }
 
 type configSnapshot struct {
+	uploadWindow          time.Duration
+	banScope              string
 	enabled               bool
 	monitorUploads        bool
 	monitorDownloads      bool
@@ -94,6 +100,18 @@ func (h *Handler) ReloadConfig(cfg map[string]interface{}) error {
 }
 
 func (h *Handler) applyConfig(cfg map[string]interface{}, initial bool) error {
+	uploadWindow := durationSecondsConfig(cfg, "upload_window_seconds", 0)
+	banScope, _ := cfg["ban_scope"].(string)
+	banScope = strings.ToLower(strings.TrimSpace(banScope))
+	if banScope == "" {
+		banScope = "site"
+	}
+	if uploadWindow < 0 || uploadWindow > 5*time.Minute {
+		return fmt.Errorf("upload_window_seconds must be between 0 and 300")
+	}
+	if banScope != "site" && banScope != "release" {
+		return fmt.Errorf("ban_scope must be site or release")
+	}
 	enabled := boolConfig(cfg, "enabled", true)
 	monitorUploads := boolConfig(cfg, "monitor_uploads", true)
 	monitorDownloads := boolConfig(cfg, "monitor_downloads", true)
@@ -118,6 +136,8 @@ func (h *Handler) applyConfig(cfg map[string]interface{}, initial bool) error {
 	debug := boolConfig(cfg, "debug", h.svc != nil && h.svc.Debug)
 
 	h.configMu.Lock()
+	h.uploadWindow = uploadWindow
+	h.banScope = banScope
 	h.enabled = enabled
 	h.monitorUploads = monitorUploads
 	h.monitorDownloads = monitorDownloads
@@ -135,13 +155,16 @@ func (h *Handler) applyConfig(cfg map[string]interface{}, initial bool) error {
 	h.tempbanDuration = tempbanDuration
 	h.debug = debug
 	h.configMu.Unlock()
+	h.mu.Lock()
+	h.samples = nil
+	h.mu.Unlock()
 
 	action := "reloaded"
 	if initial {
 		action = "initialized"
 	}
 	h.logf(
-		"%s enabled=%v uploads=%v downloads=%v up_min=%.1fKB/s down_min=%.1fKB/s min_users=%d tempban=%v tempban_seconds=%d",
+		"%s enabled=%v uploads=%v downloads=%v up_min=%.1fKB/s down_min=%.1fKB/s min_users=%d tempban=%v tempban_seconds=%d upload_window_seconds=%d ban_scope=%s",
 		action,
 		enabled,
 		monitorUploads,
@@ -151,6 +174,8 @@ func (h *Handler) applyConfig(cfg map[string]interface{}, initial bool) error {
 		minUsersOnline,
 		tempbanAfterKick,
 		int(tempbanDuration/time.Second),
+		int(uploadWindow/time.Second),
+		banScope,
 	)
 	return nil
 }
@@ -159,6 +184,8 @@ func (h *Handler) snapshotConfig() configSnapshot {
 	h.configMu.RLock()
 	defer h.configMu.RUnlock()
 	return configSnapshot{
+		uploadWindow:          h.uploadWindow,
+		banScope:              h.banScope,
 		enabled:               h.enabled,
 		monitorUploads:        h.monitorUploads,
 		monitorDownloads:      h.monitorDownloads,
@@ -181,7 +208,7 @@ func (h *Handler) OnEvent(evt *plugin.Event) error { return nil }
 
 func (h *Handler) ValidateLogin(u *user.User, remoteIP string) error {
 	cfg := h.snapshotConfig()
-	if u == nil || !cfg.enabled || !cfg.tempbanAfterKick || cfg.tempbanDuration <= 0 {
+	if u == nil || !cfg.enabled || cfg.banScope == "release" || !cfg.tempbanAfterKick || cfg.tempbanDuration <= 0 {
 		return nil
 	}
 	if _, excluded := cfg.excludeUsers[strings.ToLower(strings.TrimSpace(u.Name))]; excluded {
@@ -234,13 +261,17 @@ func (h *Handler) handleSlowTransfer(snap plugin.ActiveSession, actualSpeedBytes
 }
 
 func (h *Handler) recordSlowTransferKick(cfg configSnapshot, snap plugin.ActiveSession, actualSpeedBytes int64, policy transferPolicy) {
-	if cfg.tempbanAfterKick && cfg.tempbanDuration > 0 {
+	if cfg.tempbanAfterKick && cfg.tempbanDuration > 0 && cfg.banScope != "release" {
 		h.setTempBan(snap.User, time.Now().Add(cfg.tempbanDuration))
 	}
 	if cfg.announceKick {
 		h.emitSlowEvent(policy.kickEvent, snap, float64(actualSpeedBytes), policy)
 	}
-	h.logf("kicked %s for slow %s in %s at %.1fKB/s", snap.User, policy.direction, snap.TransferPath, float64(actualSpeedBytes)/1024.0)
+	action := "kicked"
+	if cfg.banScope == "release" && policy.direction == "upload" {
+		action = "aborted upload for"
+	}
+	h.logf("%s %s for slow %s in %s at %.1fKB/s", action, snap.User, policy.direction, snap.TransferPath, float64(actualSpeedBytes)/1024.0)
 }
 
 func (h *Handler) Stop() error {
@@ -288,10 +319,39 @@ func (h *Handler) checkActiveTransfers(now time.Time) {
 		if !ok {
 			continue
 		}
-		if snap.TransferStartedAt.IsZero() || now.Sub(snap.TransferStartedAt) < grace {
+		started := snap.TransferStartedAt
+		if strings.TrimSpace(snap.TransferSlaveName) != "" && snap.TransferSlaveIdx != 0 {
+			stat, found := liveStats[liveTransferKey{
+				slave: strings.ToLower(strings.TrimSpace(snap.TransferSlaveName)),
+				index: snap.TransferSlaveIdx,
+			}]
+			if !found || !sameTransferPath(stat.Path, snap.TransferPath) {
+				h.clearSamples(key)
+				continue
+			}
+			// Slave timing excludes connect/TLS setup and starts at the first byte.
+			started = stat.StartedAt
+		}
+		if started.IsZero() {
+			h.clearSamples(key)
 			continue
 		}
 		speed, ok := transferSpeedBytes(snap, liveStats, now)
+		if policy.direction == "upload" && cfg.uploadWindow > 0 {
+			bytes := snap.TransferBytes
+			windowStart := time.Time{}
+			if stat, found := liveStats[liveTransferKey{strings.ToLower(strings.TrimSpace(snap.TransferSlaveName)), snap.TransferSlaveIdx}]; found {
+				bytes = stat.Transferred
+				windowStart = stat.StartedAt
+			} else if bytes == 0 {
+				h.clearSamples(key)
+				continue
+			}
+			speed, ok = h.windowSpeed(key, windowStart, now, bytes, cfg.uploadWindow)
+		}
+		if now.Sub(started) < grace {
+			continue
+		}
 		if !ok {
 			continue
 		}
@@ -388,6 +448,46 @@ func (h *Handler) kickSlowTransfer(cfg configSnapshot, snap plugin.ActiveSession
 
 	reason := fmt.Sprintf("slowkick: %.0fB/s below %.0fB/s", speed, policy.minSpeedBytes)
 	stopped := false
+	if cfg.banScope == "release" && policy.direction == "upload" {
+		root := h.releaseRoot(snap.TransferPath)
+		if root == "" || h.svc == nil || h.svc.AbortSessionTransfer == nil {
+			h.forgetKickedTransfer(key)
+			return
+		}
+		// Install before aborting so another session cannot immediately reclaim
+		// this release while the transfer handler is unwinding.
+		banKey := releaseBanKey{strings.ToLower(strings.TrimSpace(snap.User)), root}
+		until := time.Now().Add(cfg.tempbanDuration)
+		var previous time.Time
+		if cfg.tempbanAfterKick && cfg.tempbanDuration > 0 {
+			h.mu.Lock()
+			if h.releaseBans == nil {
+				h.releaseBans = make(map[releaseBanKey]time.Time)
+			}
+			previous = h.releaseBans[banKey]
+			if previous.After(until) {
+				until = previous
+			}
+			h.releaseBans[banKey] = until
+			h.mu.Unlock()
+		}
+		stopped = h.svc.AbortSessionTransfer(snap, reason)
+		if !stopped {
+			h.mu.Lock()
+			if h.releaseBans[banKey] == until {
+				if previous.IsZero() {
+					delete(h.releaseBans, banKey)
+				} else {
+					h.releaseBans[banKey] = previous
+				}
+			}
+			h.mu.Unlock()
+			h.forgetKickedTransfer(key)
+			return
+		}
+		h.recordSlowTransferKick(cfg, snap, int64(speed), policy)
+		return
+	}
 	if h.svc != nil {
 		// Disconnecting the FTP session also aborts its attached slave or local
 		// data connection. An abort without the disconnect leaves the user logged
@@ -447,6 +547,11 @@ func (h *Handler) pruneKickedTransfers(active map[string]struct{}) {
 	for key := range h.kickedTransfers {
 		if _, ok := active[key]; !ok {
 			delete(h.kickedTransfers, key)
+		}
+	}
+	for key := range h.samples {
+		if _, ok := active[key]; !ok {
+			delete(h.samples, key)
 		}
 	}
 }
@@ -544,6 +649,11 @@ func (h *Handler) pruneExpiredTempBans(now time.Time) {
 			delete(h.tempBans, username)
 		}
 	}
+	for key, until := range h.releaseBans {
+		if !until.After(now) {
+			delete(h.releaseBans, key)
+		}
+	}
 }
 
 func (h *Handler) logf(format string, args ...interface{}) {
@@ -561,6 +671,7 @@ func (h *Handler) emitSlowEvent(eventType string, snap plugin.ActiveSession, spe
 	}
 	cfg := h.snapshotConfig()
 	data := map[string]string{
+		"ban_scope":        cfg.banScope,
 		"username":         strings.TrimSpace(snap.User),
 		"group":            strings.TrimSpace(snap.PrimaryGroup),
 		"direction":        policy.direction,

@@ -10,6 +10,7 @@ import (
 
 	"weaveftpd/internal/plugin"
 	"weaveftpd/internal/timeutil"
+	"weaveftpd/internal/user"
 )
 
 type Handler struct {
@@ -55,6 +56,29 @@ func (h *Handler) Init(svc *plugin.Services, cfg map[string]interface{}) error {
 }
 
 func (h *Handler) OnEvent(evt *plugin.Event) error { return nil }
+
+// Normal uploads arrive here after VFS link resolution. Fail closed if a
+// configured dated alias was not resolved, rather than creating it on disk.
+func (h *Handler) validateResolvedLink(target string) error {
+	if !h.todaySymlink {
+		return nil
+	}
+	first := strings.Split(strings.TrimPrefix(path.Clean("/"+target), "/"), "/")[0]
+	for _, section := range h.sections {
+		section = strings.Trim(strings.TrimSpace(section), "/")
+		if section != "" && strings.EqualFold(first, h.symlinkPrefix+section) {
+			return fmt.Errorf("virtual dated link is not resolved: use /%s or retry after link initialization", section)
+		}
+	}
+	return nil
+}
+
+func (h *Handler) ValidateMKDir(_ *user.User, target string) error {
+	return h.validateResolvedLink(target)
+}
+func (h *Handler) ValidateUpload(_ *user.User, target string) error {
+	return h.validateResolvedLink(target)
+}
 
 func (h *Handler) Stop() error {
 	h.stopOnce.Do(func() { close(h.stopCh) })
@@ -102,12 +126,16 @@ func (h *Handler) apply(now time.Time) {
 		linkPath := ""
 		if h.todaySymlink {
 			linkPath = "/" + h.symlinkPrefix + section
-			if h.symlinkCurrent(linkPath, todayPath) {
+			current := h.symlinkCurrent(linkPath, todayPath)
+			// Register ownership even when a restored snapshot already has the link.
+			if err := h.svc.Bridge.VFSSymlink(linkPath, todayPath); err != nil {
+				if h.debug {
+					log.Printf("[DATEDDIRS] symlink %s -> %s failed: %v", linkPath, todayPath, err)
+				}
+			} else if current {
 				if h.debug {
 					log.Printf("[DATEDDIRS] symlink %s already points to %s", linkPath, todayPath)
 				}
-			} else if err := h.svc.Bridge.VFSSymlink(linkPath, todayPath); err != nil && h.debug {
-				log.Printf("[DATEDDIRS] symlink %s -> %s failed: %v", linkPath, todayPath, err)
 			}
 		}
 
