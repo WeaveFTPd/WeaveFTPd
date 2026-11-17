@@ -92,7 +92,7 @@ therefore does not authenticate the remote peer.
   is empty, the legacy IP-mask setup still encrypts the control connection but
   does not authenticate the master. An IP mask only authenticates the slave to
   the master; it is not a replacement for master certificate verification.
-- Active/SSCN `PROT P` FXP and slave-to-slave outbound data connections use a
+- Active/passive SSCN and CPSV `PROT P` FXP and slave-to-slave outbound data connections use a
   compatibility TLS client that does not verify a peer certificate. Those data
   channels are encrypted but not certificate-authenticated. Keep FXP peers
   trusted and use mTLS for the independent master/slave control link.
@@ -100,6 +100,22 @@ therefore does not authenticate the remote peer.
 WeaveFTPd intentionally keeps these compatibility modes for existing sites.
 New deployments should use strict/custom verification for IRC and mTLS for
 master/slave control connections.
+
+## Secure FXP data-channel roles
+
+With `PROT P`, `SSCN ON` makes STOR/RETR use the TLS client role for both
+PASV and PORT. `SSCN OFF` restores the TLS server role. The peer must use the
+opposite role. SSCN remains set until changed by the client; CPSV selects
+TLS client mode for its next passive connection without changing SSCN.
+Directory listings retain their normal TLS behavior after an FXP transfer.
+Completed TLS-client downloads send close_notify and briefly drain pending
+TLS 1.3 session tickets before closing TCP, so the final file bytes are retained.
+This applies to direct slave transfers and file transfers through the proxy backend.
+
+Run `tests/fxp_tls_roles.py STAGE` in an isolated Linux network namespace
+(the same setup as `tests/live_downloads.py`). It covers TLS 1.2 and 1.3,
+PASV/PORT/CPSV uploads and downloads, live uploads, persistent SSCN, REST, listings, and
+clear data after PROT C. STAGE must contain the built `weaveftpd.candidate`.
 
 ## Upgrade Checklist
 

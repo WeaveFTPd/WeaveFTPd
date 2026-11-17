@@ -28,7 +28,7 @@ func (s *Session) abortCurrentTransfer(reason string) bool {
 		}
 	}
 	if dataConn != nil {
-		_ = dataConn.Close()
+		abortFileDataSend(dataConn)
 		aborted = true
 	}
 

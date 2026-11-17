@@ -192,6 +192,23 @@ func (pm *PluginManager) ValidateLogin(u *user.User, remoteIP string) error {
 	return nil
 }
 
+func (pm *PluginManager) ValidateUpload(u *user.User, targetPath string) error {
+	if pm == nil || u == nil {
+		return nil
+	}
+	pm.mu.RLock()
+	plugins := append([]plugin.Plugin(nil), pm.plugins...)
+	pm.mu.RUnlock()
+	for _, p := range plugins {
+		if v, ok := p.(plugin.UploadValidator); ok {
+			if err := v.ValidateUpload(u, targetPath); err != nil {
+				return fmt.Errorf("%s: %w", p.Name(), err)
+			}
+		}
+	}
+	return nil
+}
+
 func (pm *PluginManager) ReloadConfigs(pluginConfigs map[string]map[string]interface{}) error {
 	if pm == nil {
 		return nil

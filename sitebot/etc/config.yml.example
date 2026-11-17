@@ -49,6 +49,10 @@ irc:
   operuser: "GoSitebot"
   operpassword: "changeme-oper"
   user_modes: "+Hi"
+  # Applied after joining configured channels and when the bot receives ops.
+  # Supports +i (invite-only), +s (secret), or +is. Empty leaves modes unchanged.
+  # Requires channel ops, or auto_oper with permission to use SAMODE.
+  channel_modes: ""
   autojoin_delay_ms: 250
   channels:
     - "#weaveftpd"

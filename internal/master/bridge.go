@@ -37,7 +37,7 @@ type Bridge struct {
 	liveTransferStatsMu    sync.Mutex
 	listingDiagnosticAt    map[string]time.Time
 
-	pendingUploads sync.Map          // clean virtual path -> pendingUpload, visible to FTP listings only
+	pendingUploads sync.Map          // in-flight files for FTP routing/listings; never completed VFS records
 	uploadRecords  chan uploadRecord // async race-DB upload writes, off the 226 path
 }
 
@@ -74,7 +74,8 @@ const (
 	readFileCacheTTL          = 2 * time.Second
 	liveTransferStatsCacheTTL = 1 * time.Second
 	bridgeTransferBufferSize  = 4 * 1024 * 1024
-	pendingUploadTTL          = 10 * time.Minute
+	// Keep live files routable for the full two-hour transfer wait, plus cleanup grace.
+	pendingUploadTTL = 2*time.Hour + time.Minute
 )
 
 var bridgeTransferBufferPool = sync.Pool{
@@ -481,7 +482,7 @@ func (b *Bridge) ListDir(dirPath string) []core.MasterFileEntry {
 }
 
 func (b *Bridge) notePendingUpload(filePath, slaveName, owner, group string, position int64) {
-	if b == nil || position > 0 || !isPendingUploadListVisible(filePath) {
+	if b == nil || position > 0 {
 		return
 	}
 	cleanPath := cleanBridgePath(filePath)
@@ -561,11 +562,6 @@ func pendingUploadEntry(pu pendingUpload) core.MasterFileEntry {
 		Group:   group,
 		Slave:   pu.slaveName,
 	}
-}
-
-func isPendingUploadListVisible(filePath string) bool {
-	name := strings.ToLower(strings.TrimSpace(path.Base(filePath)))
-	return strings.HasSuffix(name, ".sfv")
 }
 
 func cleanBridgePath(filePath string) string {
@@ -1039,6 +1035,10 @@ func (b *Bridge) writeUploadRecord(rec uploadRecord) {
 //  4. Tell slave to SEND the file
 //  5. Bridge data: read from slave, write to clientData
 func (b *Bridge) DownloadFile(filePath string, clientData net.Conn, username, primaryGroup string, position int64, transferType byte) (uint32, error) {
+	return b.DownloadFileTracked(filePath, clientData, username, primaryGroup, position, transferType, nil)
+}
+
+func (b *Bridge) DownloadFileTracked(filePath string, clientData net.Conn, username, primaryGroup string, position int64, transferType byte, onReady core.TransferReadyFunc) (uint32, error) {
 	slave := b.selectSlaveForDownloadIncludingPending(filePath)
 	if slave == nil {
 		return 0, fmt.Errorf("file not found on any available slave: %s", filePath)
@@ -1065,6 +1065,9 @@ func (b *Bridge) DownloadFile(filePath string, clientData net.Conn, username, pr
 
 	slaveAddr := net.JoinHostPort(slave.GetPASVIP(), strconv.Itoa(transferResp.Info.Port))
 	log.Printf("[Bridge] Connecting to slave %s at %s for download of %s", slave.Name(), slaveAddr, filePath)
+	if onReady != nil {
+		onReady(slave.Name(), transferResp.Info.TransferIndex)
+	}
 
 	slaveConn, err := net.DialTimeout("tcp", slaveAddr, 10*time.Second)
 	if err != nil {
@@ -1163,6 +1166,11 @@ func (b *Bridge) cleanupZipDizAfterDelete(filePath string) {
 func (b *Bridge) RenameFile(from, toDir, toName string) error {
 	vfsFile := b.sm.GetVFS().GetFile(from)
 	toPath := filepath.Join(toDir, toName)
+	if target := b.sm.GetVFS().GetFile(toPath); target != nil && target.VirtualOnly {
+		return fmt.Errorf("cannot replace a virtual link: %s", toPath)
+	}
+	toPath = b.ResolvePath(toPath)
+	toDir, toName = filepath.Dir(toPath), filepath.Base(toPath)
 	if err := b.sm.RenameFile(from, toDir, toName); err != nil {
 		return err
 	}
@@ -1734,7 +1742,7 @@ func (b *Bridge) Symlink(linkPath, targetPath string) error {
 func (b *Bridge) VFSSymlink(linkPath, targetPath string) error {
 	linkPath = filepath.ToSlash(filepath.Clean(linkPath))
 	targetPath = filepath.ToSlash(filepath.Clean(targetPath))
-	b.sm.GetVFS().AddSymlink(linkPath, targetPath)
+	b.sm.GetVFS().AddVirtualSymlink(linkPath, targetPath)
 	return nil
 }
 

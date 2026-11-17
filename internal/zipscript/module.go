@@ -40,7 +40,9 @@ type StatusMarkerEntry struct {
 	ModTime    int64
 }
 
-var zipPayloadNameRE = regexp.MustCompile(`(?i)\.(zip|z\d\d)$`)
+// ZIP-style sections also carry native Amiga archives. Format-specific ZIP
+// validation and DIZ extraction must still use IsZipRecoverableArchiveName.
+var zipPayloadNameRE = regexp.MustCompile(`(?i)\.(zip|z\d\d|dms|lha)$`)
 var multiDiscReleaseDirRE = regexp.MustCompile(`(?i)^(?:cd|disc|disk|dvd)[0-9]{1,2}$`)
 var discDirNameRE = regexp.MustCompile(`(?i)^(?:cd|disc|disk|dvd)[0-9]+$`)
 
@@ -463,7 +465,7 @@ func ValidateUpload(cfg Config, uploadUser *user.User, dirPath, fileName string,
 	}
 	hasReadableSFV := sfvEntries != nil
 	hasNamedSFV := false
-	sfvFirstEnforced := sfvFirstAppliesToUpload(cfg, uploadUser, dirPath)
+	sfvPolicyApplies := sfvPolicyAppliesToUpload(cfg, uploadUser, dirPath)
 	for _, name := range existingNames {
 		if strings.HasSuffix(strings.ToLower(strings.TrimSpace(name)), ".sfv") {
 			hasNamedSFV = true
@@ -473,11 +475,24 @@ func ValidateUpload(cfg Config, uploadUser *user.User, dirPath, fileName string,
 		}
 	}
 
-	if !hasReadableSFV && !hasNamedSFV && cfg.SFV.ForceFirst && sfvFirstEnforced && isPayload && !allowedOutsideSFV && !isSFV {
+	// Do not let globally allowed sample/archive types bypass the release manifest.
+	// Child directories and ZIP-style releases keep their own upload policies.
+	if cfg.SFV.StrictReleaseRoot && sfvRestrictFiles(cfg) && sfvPolicyApplies &&
+		UsesSFVEntry(cfg, dirPath) && !UsesZip(cfg, dirPath) && !IsIgnoredReleaseSubdir(cfg, dirPath) &&
+		!isSFV && !isSFVRootSidecar(fileName) {
+		if len(sfvEntries) == 0 {
+			return errors.New("zipscript: upload a valid .sfv before payload files in this release")
+		}
+		if !listedInSFV {
+			return fmt.Errorf("zipscript: %q is not listed in the .sfv", fileName)
+		}
+	}
+
+	if !hasReadableSFV && !hasNamedSFV && cfg.SFV.ForceFirst && sfvPolicyApplies && isPayload && !allowedOutsideSFV && !isSFV {
 		return errors.New("zipscript: upload the .sfv before payload files in this release")
 	}
 
-	if hasReadableSFV && sfvFirstEnforced && !isSFV && isPayload && !allowedOutsideSFV {
+	if hasReadableSFV && sfvPolicyApplies && !isSFV && isPayload && !allowedOutsideSFV {
 		if sfvRestrictFiles(cfg) && !listedInSFV {
 			return fmt.Errorf("zipscript: %q is not listed in the .sfv", fileName)
 		}
@@ -492,6 +507,16 @@ func ValidateUpload(cfg Config, uploadUser *user.User, dirPath, fileName string,
 	}
 
 	return nil
+}
+
+func isSFVRootSidecar(fileName string) bool {
+	switch normalizedExt(fileName) {
+	case "nfo", "txt", "jpg", "jpeg", "png", "gif", "cue", "m3u", "log", "diz",
+		"debug", "message", "imdb", "html", "url", "metadata":
+		return true
+	default:
+		return false
+	}
 }
 
 func isConfiguredRaceContainerUpload(cfg Config, dirPath, fileName string) bool {
@@ -542,8 +567,8 @@ func isTopLevelPath(dirPath string) bool {
 	return clean != "" && !strings.Contains(clean, "/")
 }
 
-func sfvFirstAppliesToUpload(cfg Config, uploadUser *user.User, dirPath string) bool {
-	if !cfg.Enabled || !cfg.SFV.ForceFirst {
+func sfvPolicyAppliesToUpload(cfg Config, uploadUser *user.User, dirPath string) bool {
+	if !cfg.Enabled {
 		return false
 	}
 	cleanPath := normalizePath(dirPath)
@@ -728,6 +753,9 @@ func AllowedOutsideSFVForDir(cfg Config, dirPath, fileName string) bool {
 
 func IsAllowedTypeForDir(cfg Config, dirPath, fileName string) bool {
 	ext := normalizedExt(fileName)
+	if UsesZip(cfg, dirPath) && IsZipPayloadName(fileName) {
+		return true
+	}
 	if ext == "" {
 		return sfvAllowNoExt(cfg)
 	}

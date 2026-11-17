@@ -35,12 +35,15 @@ var (
 	nextSessionID              atomic.Uint64
 	activeSessions             sync.Map
 	transferPathReservationsMu sync.Mutex
-	activeUploadReservations   = map[string]struct{}{}
+	activeUploadReservations   = map[string]*uploadPathState{}
 	activeDownloadPaths        = map[string]int{}
 )
 
 func registerSession(s *Session) uint64 {
 	id := nextSessionID.Add(1)
+	s.ID = id
+	s.controlTransport = s.Conn
+	s.remoteAddress = remoteAddrString(s.Conn)
 	activeSessions.Store(id, s)
 	return id
 }
@@ -59,7 +62,7 @@ func reserveUploadPath(filePath string) bool {
 	if _, exists := activeUploadReservations[cleanPath]; exists || activeDownloadPaths[cleanPath] > 0 {
 		return false
 	}
-	activeUploadReservations[cleanPath] = struct{}{}
+	activeUploadReservations[cleanPath] = &uploadPathState{done: make(chan struct{})}
 	return true
 }
 
@@ -69,6 +72,9 @@ func releaseUploadPath(filePath string) {
 		return
 	}
 	transferPathReservationsMu.Lock()
+	if state := activeUploadReservations[cleanPath]; state != nil {
+		state.finish(false)
+	}
 	delete(activeUploadReservations, cleanPath)
 	transferPathReservationsMu.Unlock()
 }
@@ -85,17 +91,25 @@ func uploadPathReserved(filePath string) bool {
 }
 
 func reserveDownloadPath(filePath string) bool {
+	_, ok := reserveDownloadPathFollowing(filePath, false)
+	return ok
+}
+
+// Reserve the reader and capture this upload generation atomically. A later
+// upload must remain blocked until all readers have released the path.
+func reserveDownloadPathFollowing(filePath string, allowLive bool) (*uploadPathState, bool) {
 	cleanPath := path.Clean(filePath)
 	if cleanPath == "." || cleanPath == "/" {
-		return false
+		return nil, false
 	}
 	transferPathReservationsMu.Lock()
 	defer transferPathReservationsMu.Unlock()
-	if _, uploading := activeUploadReservations[cleanPath]; uploading {
-		return false
+	upload := activeUploadReservations[cleanPath]
+	if upload != nil && !allowLive {
+		return nil, false
 	}
 	activeDownloadPaths[cleanPath]++
-	return true
+	return upload, true
 }
 
 func releaseDownloadPath(filePath string) {
@@ -132,10 +146,10 @@ func listActiveSessions() []sessionSnapshot {
 		}
 		snap := sessionSnapshot{
 			ID:         s.ID,
-			Remote:     remoteAddrString(s.Conn),
+			Remote:     s.remoteAddress,
 			CurrentDir: s.CurrentDir,
 			StartedAt:  s.StartedAt,
-			LoggedIn:   s.IsLogged,
+			LoggedIn:   s.IsLogged && !s.disconnected.Load(),
 		}
 		s.stateMu.RLock()
 		snap.LastCommandAt = s.LastCommandAt
@@ -146,7 +160,7 @@ func listActiveSessions() []sessionSnapshot {
 		snap.TransferSlaveName = s.TransferSlaveName
 		snap.TransferSlaveIdx = s.TransferSlaveIdx
 		s.stateMu.RUnlock()
-		if s.IsLogged && s.User != nil {
+		if snap.LoggedIn && s.User != nil {
 			snap.User = s.User.Name
 			snap.PrimaryGroup = s.User.PrimaryGroup
 			snap.Flags = s.User.Flags
@@ -217,7 +231,7 @@ func countSessionsForUser(username string) int {
 	count := 0
 	activeSessions.Range(func(key, value interface{}) bool {
 		s, ok := value.(*Session)
-		if !ok || s == nil || !s.IsLogged || s.User == nil {
+		if !ok || s == nil || s.disconnected.Load() || !s.IsLogged || s.User == nil {
 			return true
 		}
 		if strings.EqualFold(s.User.Name, username) {
@@ -261,7 +275,7 @@ func countSessionsForGroup(group string) int {
 	count := 0
 	activeSessions.Range(func(key, value interface{}) bool {
 		s, ok := value.(*Session)
-		if !ok || s == nil || !s.IsLogged || s.User == nil {
+		if !ok || s == nil || s.disconnected.Load() || !s.IsLogged || s.User == nil {
 			return true
 		}
 		if s.User.IsInGroup(group) {
@@ -281,11 +295,14 @@ func DisconnectActiveSession(id uint64) bool {
 		return false
 	}
 	s, ok := val.(*Session)
-	if !ok || s == nil || s.Conn == nil {
+	if !ok || s == nil || s.controlTransport == nil {
 		return false
 	}
+	if s.disconnected.Swap(true) {
+		return true
+	}
 	s.abortCurrentTransfer("session disconnected")
-	_ = s.Conn.Close()
+	_ = s.controlTransport.Close()
 	return true
 }
 
@@ -301,8 +318,13 @@ func kickActiveUser(username string) int {
 			return true
 		}
 		if strings.EqualFold(s.User.Name, username) {
+			if s.disconnected.Swap(true) {
+				return true
+			}
 			s.abortCurrentTransfer("user kicked")
-			_ = s.Conn.Close()
+			if s.controlTransport != nil {
+				_ = s.controlTransport.Close()
+			}
 			kicked++
 		}
 		return true

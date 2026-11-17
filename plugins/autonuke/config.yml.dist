@@ -134,6 +134,8 @@ half_empty:
     - "m2v"
     - "mpeg"
     - "zip"
+    - "dms"
+    - "lha"
     - "rar"
     - "r00"
     - "r01"

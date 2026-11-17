@@ -27,6 +27,24 @@ Security
   defaults and into the staff command group while keeping `BW` public.
 
 Reliability and race integrity
+- Preserve master-owned virtual links across slave remerges and snapshot reloads.
+- Keep race database rename/delete/metadata updates within exact, case-sensitive directory subtrees.
+- Add opt-in section-case checks for FTP writes to prevent duplicate section spellings.
+- Add opt-in strict SFV release-root uploads without changing Sample/Subs or ZIP-style section policies.
+- Recognize DMS/LHA payloads in ZIP-style sections and autonuke defaults without
+  treating native Amiga archives as ZIP files for integrity checks.
+- Abort live downloads of failed uploads and release their path reservations
+  before replying, so stalled downloaders do not block a clean reupload.
+- Add optional rolling-window upload speed checks and release-scoped slowkick
+  bans that keep the FTP connection and other releases available.
+- Start slave slowkick grace periods at the first data byte, excluding setup.
+- Release kicked user/group login slots while transfer cleanup finishes.
+- Wait for pending uploads to create their files before following downloads,
+  with bounded waits and source-failure handling.
+- Enforce SFV file restrictions independently of the SFV-first requirement.
+- Avoid concurrent reads of the control connection during AUTH TLS in session
+  snapshots and kicks; retain the registered peer address and original transport
+  to prevent session-monitor crashes during TLS upgrades.
 - Treat duplicate race upload attempts for a file already being uploaded as a
   normal duplicate/X-DUPE reply instead of a temporary retry response, matching
   racer expectations from glFTPd-style sites.

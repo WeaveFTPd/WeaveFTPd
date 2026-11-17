@@ -49,6 +49,7 @@ type RaceConfig struct {
 }
 
 type SFVConfig struct {
+	StrictReleaseRoot bool     `yaml:"strict_release_root"`
 	ForceFirst        bool     `yaml:"force_first"`
 	DenyDoubleSFV     bool     `yaml:"deny_double_sfv"`
 	DeleteBadCRC      bool     `yaml:"delete_bad_crc"`
