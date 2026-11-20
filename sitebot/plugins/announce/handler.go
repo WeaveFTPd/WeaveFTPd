@@ -984,8 +984,8 @@ func (p *AnnouncePlugin) OnEvent(evt *event.Event) ([]plugin.Output, error) {
 			}
 			perVars["nukees_colored"] = colorizeNukees(nukees)
 			outs = append(outs, plugin.Output{Type: "NUKE", Text: p.render("NUKE_NUKEES", perVars, fmt.Sprintf("NUKED: [nukees] --> %s", perVars["nukees_colored"]))})
-			outs = append(outs, plugin.Output{Type: "NUKE", Text: "\u00a0"})
 		}
+		outs = append(outs, plugin.Output{Type: "NUKE", Text: "\u00a0"})
 	case event.EventUnnuke:
 		outs = append(outs, plugin.Output{Type: "UNNUKE", Text: p.render("UNNUKE", vars, fmt.Sprintf("UNNUKE: [%s] %s by %s", section, rel, evt.User))})
 	case event.EventAutonukeWarn:
@@ -1010,7 +1010,20 @@ func (p *AnnouncePlugin) OnEvent(evt *event.Event) ([]plugin.Output, error) {
 		// Expose the friendly "AUTONUKE INCOMPLETE"-style label so the theme can
 		// colorize it (and the section/release) per-part like the NUKE line.
 		vars["autonuke_label"] = friendlyAutonukeLabel(vars["tag"], vars["reason"])
-		outs = append(outs, plugin.Output{Type: "AUTONUKEWARN", Text: p.render("AUTONUKEWARN", vars, "WARN: "+message)})
+		vars["autonuke_reason"] = strings.TrimSpace(strings.TrimPrefix(vars["autonuke_label"], "AUTONUKE"))
+		lines := []string{p.render("AUTONUKEWARN", vars, "WARN: "+message)}
+		for _, field := range []struct{ key, template string }{
+			{"owner", "AUTONUKEWARN_OWNER"},
+			{"warn_after", "AUTONUKEWARN_AGE"},
+			{"nuke_after", "AUTONUKEWARN_DEADLINE"},
+		} {
+			if strings.TrimSpace(vars[field.key]) != "" {
+				if line := p.render(field.template, vars, ""); strings.TrimSpace(line) != "" {
+					lines = append(lines, line)
+				}
+			}
+		}
+		outs = append(outs, plugin.Output{Type: "AUTONUKEWARN", Text: strings.Join(lines, "\n") + "\n\u00a0"})
 	case event.EventAutonukeDelete:
 		message := strings.TrimSpace(vars["message"])
 		if message == "" {
@@ -1020,7 +1033,17 @@ func (p *AnnouncePlugin) OnEvent(evt *event.Event) ([]plugin.Output, error) {
 			}
 		}
 		vars["message"] = message
-		outs = append(outs, plugin.Output{Type: "AUTONUKEDELETE", Text: p.render("AUTONUKEDELETE", vars, "AUTONUKE: "+message)})
+		vars["delete_detail"] = vars["reason"]
+		if strings.HasPrefix(strings.ToLower(vars["reason"]), "deleted after ") {
+			vars["delete_detail"] = "Deleted release after " + vars["reason"][len("deleted after "):]
+		}
+		line := p.render("AUTONUKEDELETE", vars, "AUTONUKE: "+message)
+		if strings.TrimSpace(vars["delete_detail"]) != "" {
+			if detail := p.render("AUTONUKEDELETE_DETAIL", vars, ""); strings.TrimSpace(detail) != "" {
+				line += "\n" + detail
+			}
+		}
+		outs = append(outs, plugin.Output{Type: "AUTONUKEDELETE", Text: line + "\n\u00a0"})
 	case event.EventUserChange:
 		message := strings.TrimSpace(vars["message"])
 		if message == "" {
