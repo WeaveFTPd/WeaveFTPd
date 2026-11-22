@@ -144,7 +144,7 @@ func (s *Session) HandleSiteUnnuke(args []string) bool {
 
 	target := args[0]
 	if bridge, ok := s.masterBridge(); ok {
-		return s.handleSiteUnnukeVFS(bridge, target)
+		return s.handleSiteUnnukeVFS(bridge, target, strings.TrimSpace(strings.Join(args[1:], " ")))
 	}
 
 	targetPath := target
@@ -227,7 +227,8 @@ func (s *Session) HandleSiteUnnuke(args []string) bool {
 	}
 
 	s.emitEvent(EventUnnuke, newPath, originalName, 0, 0, map[string]string{
-		"users": strconv.Itoa(len(uploaderBytes)),
+		"users":  strconv.Itoa(len(uploaderBytes)),
+		"reason": strings.TrimSpace(strings.Join(args[1:], " ")),
 	})
 	totalMB := BytesToMB(SumBytes(uploaderBytes))
 	fmt.Fprintf(s.Conn, "200 Unnuked: %d MB, %d users affected, %d credits restored.\r\n",
@@ -365,7 +366,7 @@ func (s *Session) handleSiteNukeVFS(bridge MasterBridge, target string, multipli
 	return false
 }
 
-func (s *Session) handleSiteUnnukeVFS(bridge MasterBridge, target string) bool {
+func (s *Session) handleSiteUnnukeVFS(bridge MasterBridge, target, reason string) bool {
 	dirPath, ok := s.resolveSiteDir(bridge, target, true)
 	if !ok {
 		return false
@@ -420,7 +421,8 @@ func (s *Session) handleSiteUnnukeVFS(bridge MasterBridge, target string) bool {
 		log.Printf("[NUKE-DB] init failed: %v", err)
 	}
 	s.emitEvent(EventUnnuke, newPath, originalName, 0, 0, map[string]string{
-		"users": strconv.Itoa(len(uploaderBytes)),
+		"users":  strconv.Itoa(len(uploaderBytes)),
+		"reason": reason,
 	})
 	fmt.Fprintf(s.Conn, "200 Unnuked %s: %d MB, %d users affected, %d credits restored.\r\n",
 		dirPath, BytesToMB(SumBytes(uploaderBytes)), len(uploaderBytes), totalRestored)

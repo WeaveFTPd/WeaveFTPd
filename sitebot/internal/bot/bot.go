@@ -809,7 +809,7 @@ func (b *Bot) handleEvent(evt *event.Event) {
 		}
 		return
 	}
-	evt.Section = b.resolveSection(evt.Path, evt.Section)
+	evt.Section = b.resolveEventSection(evt)
 	log.Printf("[Bot] handleEvent %s section=%s path=%s file=%s user=%s", evt.Type, evt.Section, evt.Path, evt.Filename, evt.User)
 	outs, err := b.Plugins.ProcessEvent(evt)
 	if err != nil {
