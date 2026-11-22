@@ -14,7 +14,7 @@ func parseFTPCommand(line string) (string, []string) {
 	cmd := strings.ToUpper(parts[0])
 	// CWD takes one pathname, not whitespace-separated arguments. Keep even
 	// repeated interior spaces; SITE and other multi-argument commands are unchanged.
-	if cmd == "CWD" && len(parts) > 1 {
+	if (cmd == "CWD" || cmd == "MDTM") && len(parts) > 1 {
 		return cmd, []string{strings.TrimLeft(line[len(parts[0]):], " \t")}
 	}
 	if cmd == "STAT" && len(parts) > 1 {

@@ -666,6 +666,8 @@ func (s *Slave) handleCommand(ac *protocol.AsyncCommand) interface{} {
 
 	case "chmod":
 		return s.handleChmod(ac)
+	case "setModTime":
+		return s.handleSetModTime(ac)
 
 	case "symlink":
 		return s.handleSymlink(ac)

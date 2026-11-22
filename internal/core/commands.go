@@ -743,29 +743,7 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 		}
 
 	case "MDTM":
-		if len(args) == 0 {
-			fmt.Fprintf(s.Conn, "501 Syntax error\r\n")
-			return false
-		}
-		if s.Config.Mode == "master" && s.MasterManager != nil {
-			if bridge, ok := s.MasterManager.(MasterBridge); ok {
-				filePath := resolveSessionPath(s.CurrentDir, args[0])
-				parent := path.Dir(filePath)
-				name := path.Base(filePath)
-				entries := bridge.ListDir(parent)
-				found := false
-				for _, e := range entries {
-					if e.Name == name {
-						fmt.Fprintf(s.Conn, "213 %s\r\n", timeutil.FTPMachineUnix(e.ModTime))
-						found = true
-						break
-					}
-				}
-				if !found {
-					fmt.Fprintf(s.Conn, "550 File not found.\r\n")
-				}
-			}
-		}
+		s.handleMDTM(args)
 
 	case "DELE":
 		if len(args) == 0 {
