@@ -243,7 +243,13 @@ func speed(v float64) string {
 	if v <= 0 {
 		return "-"
 	}
-	return fmt.Sprintf("%.1fMB/s", v/1024.0/1024.0)
+	units := [...]string{"B/s", "KB/s", "MB/s", "GB/s", "TB/s", "PB/s"}
+	unit := 0
+	for v >= 1024 && unit < len(units)-1 {
+		v /= 1024
+		unit++
+	}
+	return fmt.Sprintf("%.2f%s", v, units[unit])
 }
 
 func raceSize(sizeBytes int64) string {
