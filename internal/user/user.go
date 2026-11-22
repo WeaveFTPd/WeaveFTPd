@@ -29,6 +29,7 @@ type User struct {
 	GID          int            `yaml:"gid"`
 	Flags        string         `yaml:"flags"`
 	Tagline      string         `yaml:"tagline"`
+	MailboxID    string         `yaml:"-"` // Stable private identity, retained across renames.
 	HomeRoot     string         `yaml:"home_root"`
 	HomeDir      string         `yaml:"homedir"`
 	CurrentDir   string         `yaml:"current_dir"` // Runtime: current FTP dir
@@ -342,6 +343,10 @@ func loadUserFile(name, path string, groupMap map[string]int) (*User, error) {
 		case "FLAGS":
 			if len(parts) > 1 {
 				u.Flags = parts[1]
+			}
+		case "MAILBOX":
+			if len(parts) == 2 {
+				u.MailboxID = parts[1]
 			}
 		case "TAGLINE":
 			if len(parts) > 1 {
@@ -667,6 +672,14 @@ func (u *User) saveLocked() error {
 	if err != nil {
 		return err
 	}
+	// An older session snapshot must not erase or replace an assigned mailbox.
+	for _, line := range strings.Split(string(currentBytes), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[0] == "MAILBOX" {
+			u.MailboxID = fields[1]
+			break
+		}
+	}
 	var buf bytes.Buffer
 	fmt.Fprintf(&buf, "USER %s\n", u.UserLine)
 	fmt.Fprintf(&buf, "GENERAL %s\n", u.GeneralLine)
@@ -674,6 +687,9 @@ func (u *User) saveLocked() error {
 	fmt.Fprintf(&buf, "TIMEFRAME %s\n", u.TimeframeLine)
 	fmt.Fprintf(&buf, "FLAGS %s\n", u.Flags)
 	fmt.Fprintf(&buf, "TAGLINE %s\n", u.Tagline)
+	if u.MailboxID != "" {
+		fmt.Fprintf(&buf, "MAILBOX %s\n", u.MailboxID)
+	}
 	fmt.Fprintf(&buf, "HOMEDIR %s\n", u.HomeRoot)
 	fmt.Fprintf(&buf, "DIR %s\n", u.HomeDir)
 	fmt.Fprintf(&buf, "ADDED %d %s\n", u.Added, u.AddedBy)

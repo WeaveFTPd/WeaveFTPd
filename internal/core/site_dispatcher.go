@@ -28,6 +28,8 @@ func (s *Session) DispatchSiteCommand(args []string) bool {
 	}
 
 	switch siteCmd {
+	case "MSG", "MAIL", "READ", "DELMSG":
+		return s.HandleSiteMail(siteCmd, remainingArgs)
 	// Informational Commands (site_info.go)
 	case "HELP":
 		return s.HandleSiteHelp(remainingArgs)
@@ -273,6 +275,10 @@ func sanitizeSiteArgsForLog(command string, args []string) []string {
 	command = strings.ToUpper(strings.TrimSpace(command))
 	clean := append([]string(nil), args...)
 	switch command {
+	case "MSG":
+		if len(clean) >= 2 {
+			return []string{clean[0], "[private message]"}
+		}
 	case "SELFIP":
 		if len(clean) >= 3 {
 			clean[2] = "********"

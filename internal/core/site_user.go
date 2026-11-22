@@ -176,6 +176,7 @@ func createUserFromArgs(s *Session, username, plaintextPassword, primaryGroup st
 		}
 	}
 	newUser.Name = username
+	newUser.MailboxID = "" // Never inherit the template's private mailbox.
 	newUser.Password = hashedPass
 	newUser.IPs = ips
 	newUser.Added = time.Now().Unix()
