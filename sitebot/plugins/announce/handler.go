@@ -290,7 +290,7 @@ func regexpRAR(name string) bool {
 func isZipFile(name string) bool {
 	return strings.HasSuffix(name, ".zip")
 }
-func speedMB(evt *event.Event) string { return fmt.Sprintf("%.2fMB/s", evt.Speed) }
+func speedMB(evt *event.Event) string { return formatSpeed(evt.Speed * 1024 * 1024) }
 func mb(size int64) string            { return fmt.Sprintf("%.0fMB", float64(size)/1024.0/1024.0) }
 
 func (p *AnnouncePlugin) vars(evt *event.Event) map[string]string {
@@ -313,6 +313,11 @@ func (p *AnnouncePlugin) vars(evt *event.Event) map[string]string {
 	}
 	for k, val := range evt.Data {
 		v[k] = val
+	}
+	for key, value := range v {
+		if strings.Contains(key, "speed") {
+			v[key] = scaleSpeed(value)
+		}
 	}
 	v["relname"] = normalizeReleaseDisplayName(evt, v["relname"])
 	if strings.TrimSpace(v["reldir"]) == "" || strings.TrimSpace(v["reldir"]) == "." || strings.TrimSpace(v["reldir"]) == "/" {
