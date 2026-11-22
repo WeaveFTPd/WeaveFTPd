@@ -34,6 +34,10 @@ func sanitizeLoggedFTPLine(line string) string {
 			return line
 		}
 		switch strings.ToUpper(fields[1]) {
+		case "MSG":
+			if len(fields) >= 4 {
+				return strings.Join(fields[:3], " ") + " [private message]"
+			}
 		case "ADDUSER", "GADDUSER", "CHPASS", "READD":
 			if len(fields) >= 4 {
 				fields[3] = "********"
@@ -178,7 +182,8 @@ func HandleSession(conn net.Conn, tlsConfig *tls.Config, cfg *Config, aclEngine 
 		}
 
 		if session.Config.Debug {
-			log.Printf("[CMD] raw=%q cmd=%q args=%q", sanitizeLoggedFTPLine(line), cmd, args)
+			_, logArgs := parseFTPCommand(sanitizeLoggedFTPLine(line))
+			log.Printf("[CMD] raw=%q cmd=%q args=%q", sanitizeLoggedFTPLine(line), cmd, logArgs)
 		}
 		session.touchActivity()
 

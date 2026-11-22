@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -556,43 +555,4 @@ func RenameUserInPasswd(oldUsername, newUsername, path string) error {
 func writeAuthFileWithDashBackup(path string, existing, next []byte, mode os.FileMode) error {
 	_ = existing
 	return atomicWriteFile(path, next, mode)
-}
-
-// atomicWriteFile writes data to path via a same-dir temp file + rename so a
-// crash or a concurrent reader never sees a torn/truncated file. The previous
-// implementation used os.WriteFile (truncate-in-place), which could corrupt or
-// lose the entire passwd/group file on an ill-timed crash.
-func atomicWriteFile(path string, data []byte, mode os.FileMode) error {
-	dir := filepath.Dir(path)
-	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmp)
-		}
-	}()
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		return err
-	}
-	if err := f.Chmod(mode); err != nil {
-		_ = f.Close()
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		_ = f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return err
-	}
-	cleanup = false
-	return nil
 }

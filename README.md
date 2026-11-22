@@ -12,6 +12,11 @@ WeaveFTPd is a distributed FTP daemon written in Go. It uses a master/slave
 architecture with a VFS, CRC/SFV checking, race stats, TLS data transfers,
 SITE commands, plugin hooks, and an IRC sitebot.
 
+Private offline messages are available through `SITE MSG`, `SITE MAIL`,
+`SITE READ` and `SITE DELMSG`, with an unread notice at login.
+See [Private user mail](docs/private-mail.md) for commands, limits and the
+permissions update required on existing installations.
+
 ## Architecture
 
 The master owns FTP control, authentication, ACL checks, VFS state, SITE
