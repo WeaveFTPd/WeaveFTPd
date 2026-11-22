@@ -988,6 +988,10 @@ func (p *AnnouncePlugin) OnEvent(evt *event.Event) ([]plugin.Output, error) {
 		outs = append(outs, plugin.Output{Type: "NUKE", Text: "\u00a0"})
 	case event.EventUnnuke:
 		outs = append(outs, plugin.Output{Type: "UNNUKE", Text: p.render("UNNUKE", vars, fmt.Sprintf("UNNUKE: [%s] %s by %s", section, rel, evt.User))})
+		if reason := strings.TrimSpace(vars["reason"]); reason != "" {
+			outs = append(outs, plugin.Output{Type: "UNNUKE", Text: p.render("UNNUKE_REASON", vars, "UNNUKE: [reason] --> "+reason)})
+		}
+		outs = append(outs, plugin.Output{Type: "UNNUKE", Text: "\u00a0"})
 	case event.EventAutonukeWarn:
 		message := strings.TrimSpace(vars["message"])
 		if message == "" {

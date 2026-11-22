@@ -453,6 +453,7 @@ announce.NUKE_REASON = "%b%c04{REASON:}%b %b%c07{%reason}%b"
 announce.NUKE_NUKEES = "%b%c04{NUKEES:}%b %c%sec_c2{%nukees}"
 
 announce.UNNUKE = "%b%c03{UNNUKE}%b %b{[%section_colored]} %b{%c14{%relname}} by %c%sec_c2{%user}"
+announce.UNNUKE_REASON = "%b%c03{UNNUKE:}%b [reason] --> %b%c07{%reason}%b"
 
 announce.PRE = "%c15{PRE} %c01{in }%section_colored%c01{: -> }%group%b %c01{gives us }%relname%b %c01{to enjoy (}%t_files%b %c01{files - }%t_mbytes%b%c01{).}%pre_suffix"
 announce.PREAUDIOINFO = "%c15{PRE} %c01{in }%section_colored%c01{: -> }%relname%b %c01{:: }%pre_audio_head%b %c01{:: }%genre%b %c01{:: }%year%b %c01{:: }%bitrate%b"
