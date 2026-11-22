@@ -101,6 +101,10 @@ rules:
         - BLOWFISH
         - IRC
         - TAGLINE
+        - MSG
+        - MAIL
+        - READ
+        - DELMSG
         - ALLUP
         - ALLDN
         - WKUP

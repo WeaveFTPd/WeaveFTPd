@@ -413,7 +413,7 @@ func (s *Session) processCommand(cmd string, args []string, tlsConfig *tls.Confi
 			s.PendingReason = ""
 			s.emitLoginMOTD()
 			fmt.Fprintf(s.Conn, "230-Tagline: %s\r\n", s.User.Tagline)
-
+			s.emitMailNotice()
 			s.showGlobalStats("230", false)
 			fmt.Fprintf(s.Conn, "230 User logged in.\r\n")
 			s.persistLoginStateAsync(s.User.Name, s.User.LastLogin)
